@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Venta de Butacas</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="nombreEvento">Venta de Butacas</h1>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="comprar">Comprar</button>
+    <button class="tab-btn" data-tab="admin">Panel Admin</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ===================== VISTA COMPRAR ===================== -->
+  <section id="tab-comprar" class="tab-panel active">
+
+    <div id="msgComprar" class="msg" hidden></div>
+
+    <div class="legend">
+      <span><i class="dot disponible"></i> Disponible</span>
+      <span><i class="dot seleccionada"></i> Seleccionada</span>
+      <span><i class="dot reservada"></i> Reservada (pendiente de pago)</span>
+      <span><i class="dot vendida"></i> Vendida</span>
+    </div>
+
+    <div class="stage">ESCENARIO</div>
+
+    <div id="seatMapWrap" class="seat-map-wrap">
+      <div id="seatMap" class="seat-map">Cargando butacas…</div>
+    </div>
+
+    <div class="summary-bar">
+      <div>
+        <strong id="cantidadSeleccionada">0</strong> butaca(s) —
+        Total: <strong>S/ <span id="totalSeleccionado">0</span></strong>
+      </div>
+      <button id="btnRefrescar" class="btn-secundario" type="button">Actualizar mapa</button>
+    </div>
+
+    <form id="formCompra" class="form-compra">
+      <h2>Datos del padre/madre</h2>
+      <label>
+        Nombre completo
+        <input type="text" id="nombrePadre" required placeholder="Ej. María Pérez">
+      </label>
+      <label>
+        Número de celular
+        <input type="tel" id="celularPadre" required placeholder="Ej. 987654321">
+      </label>
+      <button type="submit" class="btn-primario">Reservar butacas seleccionadas</button>
+    </form>
+
+    <div id="resultadoCompra" class="resultado-compra" hidden></div>
+  </section>
+
+  <!-- ===================== VISTA ADMIN ===================== -->
+  <section id="tab-admin" class="tab-panel">
+
+    <div id="loginAdmin" class="login-admin">
+      <h2>Ingreso administrador</h2>
+      <label>
+        Clave de administrador
+        <input type="password" id="claveAdmin" placeholder="Clave">
+      </label>
+      <button id="btnLoginAdmin" class="btn-primario" type="button">Ingresar</button>
+      <div id="msgLoginAdmin" class="msg" hidden></div>
+    </div>
+
+    <div id="panelAdmin" class="panel-admin" hidden>
+
+      <nav class="subtabs">
+        <button class="subtab-btn active" data-subtab="ventas">Ventas</button>
+        <button class="subtab-btn" data-subtab="qr">QR de pago</button>
+      </nav>
+
+      <div id="subtab-ventas" class="subtab-panel active">
+        <div class="admin-toolbar">
+          <button id="btnRefrescarVentas" class="btn-secundario" type="button">Actualizar ventas</button>
+          <button id="btnExportarSheet" class="btn-secundario" type="button">Abrir Google Sheet</button>
+        </div>
+        <div id="msgVentas" class="msg" hidden></div>
+        <div class="tabla-wrap">
+          <table id="tablaVentas">
+            <thead>
+              <tr>
+                <th>ID</th><th>Fecha</th><th>Padre/Madre</th><th>Celular</th>
+                <th>Butacas</th><th>Total</th><th>Estado</th><th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="subtab-qr" class="subtab-panel">
+        <h2>QR de pago (Yape / Plin / transferencia)</h2>
+        <p>Esta imagen es la que verán los padres para pagar. Solo el administrador puede cambiarla.</p>
+        <div class="qr-actual">
+          <p>QR actual:</p>
+          <img id="qrPagoPreview" alt="QR de pago actual" class="qr-img">
+        </div>
+        <label>
+          Nueva imagen de QR
+          <input type="file" id="inputQR" accept="image/*">
+        </label>
+        <label>
+          Texto informativo (ej. "Yape al 987654321 - Colegio XYZ")
+          <input type="text" id="infoQR" placeholder="Información de pago">
+        </label>
+        <button id="btnGuardarQR" class="btn-primario" type="button">Guardar nuevo QR</button>
+        <div id="msgQR" class="msg" hidden></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<div id="modalTicket" class="modal" hidden>
+  <div class="modal-content">
+    <button id="cerrarModal" class="modal-cerrar" type="button">&times;</button>
+    <div id="modalTicketBody"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
