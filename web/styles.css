@@ -288,6 +288,9 @@ th { background: #f1f5f9; }
   padding: 16px;
   z-index: 50;
 }
+.modal[hidden] { display: none; }
+
+.tab-btn.oculto { display: none; }
 .modal-content {
   background: #fff;
   border-radius: var(--radio);

@@ -170,6 +170,13 @@ function regenerarButacas_() {
   sheet.getRange(2, 1, rows.length, 5).setValues(rows);
 }
 
+// Función pública para poder ejecutarla desde el desplegable del editor
+// (Apps Script no lista ahí las funciones que terminan en "_").
+function regenerarButacasManual() {
+  regenerarButacas_();
+  SpreadsheetApp.getUi().alert('Butacas regeneradas correctamente.');
+}
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Boletería')

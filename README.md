@@ -62,8 +62,8 @@ npx vercel --prod
 
 ## 4. Uso diario
 
-- **Padres/compradores**: entran al link de Vercel, ven el mapa de butacas, seleccionan las que quieren, ponen su nombre y celular, y quedan **reservadas** (amarillo). Ven el QR de pago y, tras pagar, guardan su comprobante (QR generado con su código de venta).
-- **Administrador/secretaria**: pestaña "Panel Admin", ingresa con la clave de `Config > AdminPassword`. Ahí puede:
+- **Padres/compradores**: entran al link normal de Vercel (`tu-proyecto.vercel.app`). Ahí **no aparece** la pestaña "Panel Admin" — solo ven el mapa de butacas, seleccionan las que quieren, ponen su nombre y celular, y quedan **reservadas** (amarillo). Ven el QR de pago y, tras pagar, guardan su comprobante (QR generado con su código de venta).
+- **Administrador/secretaria**: entra con el link especial `tu-proyecto.vercel.app/?admin=1` — ahí sí aparece la pestaña "Panel Admin". Ingresa con la clave de `Config > AdminPassword` (la contraseña sigue siendo la protección real, el link solo evita que los padres vean el botón). Ahí puede:
   - Ver todas las ventas (también visibles directamente en la hoja `Ventas` del Google Sheet).
   - **Confirmar** una venta (verificó el pago) → la butaca pasa a "vendida".
   - **Cancelar** una venta (no pagó) → la butaca vuelve a estar disponible.

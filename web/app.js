@@ -302,5 +302,18 @@ document.getElementById('cerrarModal').addEventListener('click', () => {
   document.getElementById('modalTicket').hidden = true;
 });
 
+// ---------- Acceso al panel admin (oculto para padres) ----------
+// La pestaña "Panel Admin" solo aparece si se entra con ?admin=1 en la URL.
+// El acceso real sigue protegido por la clave de administrador (verificada en el servidor).
+function revisarAccesoAdmin() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('admin') === '1') {
+    const btnAdmin = document.getElementById('btnTabAdmin');
+    btnAdmin.classList.remove('oculto');
+    btnAdmin.click();
+  }
+}
+
 // ---------- Inicio ----------
 cargarMapa();
+revisarAccesoAdmin();
