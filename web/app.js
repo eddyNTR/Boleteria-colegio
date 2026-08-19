@@ -1,6 +1,7 @@
 // ---------- Estado ----------
 let datosEvento = null;
-let seleccionadas = new Set();
+let funcionActual = null;
+let seleccionadas = new Set(); // códigos de butaca, ej. "A1" (sin prefijo de función)
 let adminPassword = null;
 
 // ---------- Utilidad de llamada a la API (Apps Script) ----------
@@ -56,14 +57,34 @@ document.querySelectorAll('.subtab-btn').forEach(btn => {
   });
 });
 
+// ---------- Selector de función (día) ----------
+document.getElementById('selectFuncion').addEventListener('change', (e) => {
+  seleccionadas.clear();
+  cargarMapa(e.target.value);
+});
+
+function poblarSelectorFunciones() {
+  const select = document.getElementById('selectFuncion');
+  select.innerHTML = '';
+  datosEvento.funciones.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = f.nombre;
+    if (f.id === datosEvento.funcionActual) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
 // ---------- Mapa de butacas ----------
-async function cargarMapa() {
+async function cargarMapa(funcionId) {
   const seatMap = document.getElementById('seatMap');
   const msg = document.getElementById('msgComprar');
   try {
-    datosEvento = await llamarApi('getDatosIniciales');
+    datosEvento = await llamarApi('getDatosIniciales', funcionId ? { funcionId } : undefined);
+    funcionActual = datosEvento.funcionActual;
     document.getElementById('nombreEvento').textContent = datosEvento.nombreEvento || 'Venta de Butacas';
     document.title = datosEvento.nombreEvento || 'Venta de Butacas';
+    poblarSelectorFunciones();
     renderMapa();
     ocultarMsg(msg);
   } catch (err) {
@@ -82,43 +103,57 @@ function renderMapa() {
     porFila[b.fila].push(b);
   });
 
-  Object.keys(porFila).sort().forEach(fila => {
-    const row = document.createElement('div');
-    row.className = 'seat-row';
+  const butacasPorFila = datosEvento.butacasPorFila || 0;
+  const pasilloTrasNumero = datosEvento.pasilloTrasNumero || 0;
 
+  // Columnas: etiqueta de fila + una columna por asiento + una columna angosta
+  // para el pasillo (si corresponde) — todas reparten el ancho disponible (1fr),
+  // así el mapa entra completo sin necesitar scroll horizontal.
+  const columnas = ['minmax(16px, 22px)'];
+  for (let n = 1; n <= butacasPorFila; n++) {
+    columnas.push('1fr');
+    if (pasilloTrasNumero && n === pasilloTrasNumero) columnas.push('minmax(6px, 12px)');
+  }
+  seatMap.style.gridTemplateColumns = columnas.join(' ');
+
+  Object.keys(porFila).sort().forEach(fila => {
     const label = document.createElement('div');
     label.className = 'seat-row-label';
     label.textContent = fila;
-    row.appendChild(label);
+    seatMap.appendChild(label);
 
     porFila[fila].sort((a, b) => a.numero - b.numero).forEach(b => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'seat ' + estadoClase(b);
       btn.textContent = b.numero;
-      btn.title = b.id;
+      btn.title = b.codigo;
       if (b.estado !== 'disponible') btn.disabled = true;
-      btn.addEventListener('click', () => toggleButaca(b.id, btn));
-      row.appendChild(btn);
-    });
+      btn.addEventListener('click', () => toggleButaca(b.codigo, btn));
+      seatMap.appendChild(btn);
 
-    seatMap.appendChild(row);
+      if (pasilloTrasNumero && Number(b.numero) === pasilloTrasNumero) {
+        const gap = document.createElement('div');
+        gap.className = 'seat-gap';
+        seatMap.appendChild(gap);
+      }
+    });
   });
 
   actualizarResumen();
 }
 
 function estadoClase(b) {
-  if (seleccionadas.has(b.id)) return 'seleccionada';
+  if (seleccionadas.has(b.codigo)) return 'seleccionada';
   return b.estado;
 }
 
-function toggleButaca(id, btn) {
-  if (seleccionadas.has(id)) {
-    seleccionadas.delete(id);
+function toggleButaca(codigo, btn) {
+  if (seleccionadas.has(codigo)) {
+    seleccionadas.delete(codigo);
     btn.classList.remove('seleccionada');
   } else {
-    seleccionadas.add(id);
+    seleccionadas.add(codigo);
     btn.classList.add('seleccionada');
   }
   actualizarResumen();
@@ -130,7 +165,7 @@ function actualizarResumen() {
   document.getElementById('totalSeleccionado').textContent = total;
 }
 
-document.getElementById('btnRefrescar').addEventListener('click', cargarMapa);
+document.getElementById('btnRefrescar').addEventListener('click', () => cargarMapa(funcionActual));
 
 // ---------- Formulario de compra ----------
 document.getElementById('formCompra').addEventListener('submit', async (e) => {
@@ -151,12 +186,12 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
 
   try {
     const venta = await llamarApi('crearVenta', {
-      nombrePadre, celular: celularPadre, butacasIds: Array.from(seleccionadas)
+      funcionId: funcionActual, nombrePadre, celular: celularPadre, asientos: Array.from(seleccionadas)
     });
     mostrarResultadoCompra(venta);
     seleccionadas.clear();
     e.target.reset();
-    await cargarMapa();
+    await cargarMapa(funcionActual);
   } catch (err) {
     mostrarMsg(msg, err.message, 'error');
   } finally {
@@ -170,19 +205,60 @@ async function mostrarResultadoCompra(venta) {
   cont.hidden = false;
   cont.innerHTML = `
     <h2>¡Reserva registrada!</h2>
+    <p>Función: <strong>${venta.funcionNombre}</strong></p>
     <p>Código de venta: <strong>${venta.ventaId}</strong></p>
-    <p>Butacas: <strong>${venta.butacas.join(', ')}</strong></p>
-    <p>Total a pagar: <strong>S/ ${venta.total}</strong></p>
-    <p>Escanea el QR de pago (${datosEvento.qrPagoInfo || 'ver con administración'}) y luego guarda este comprobante:</p>
+    <p>Butacas: <strong>${venta.asientos.join(', ')}</strong></p>
+    <p>Total a pagar: <strong>Bs ${venta.total}</strong></p>
+    <p>Escanea el QR de pago (${datosEvento.qrPagoInfo || 'ver con administración'}):</p>
     ${datosEvento.qrPagoURL ? `<img class="qr-img" src="${datosEvento.qrPagoURL}" alt="QR de pago">` : '<p><em>El colegio aún no configuró el QR de pago.</em></p>'}
+    <p>Guarda este comprobante:</p>
     <canvas id="canvasComprobante"></canvas>
     <p><small>Tu butaca queda <strong>reservada</strong> hasta que el colegio confirme tu pago.</small></p>
+
+    <div class="subir-comprobante">
+      <h3>Sube la captura de tu pago</h3>
+      <p><small>Foto o captura de pantalla del Yape/Plin/transferencia, para que el colegio confirme más rápido.</small></p>
+      <label>
+        Imagen del comprobante
+        <input type="file" id="inputComprobante" accept="image/*">
+      </label>
+      <button id="btnSubirComprobante" class="btn-primario" type="button">Subir comprobante</button>
+      <div id="msgComprobante" class="msg" hidden></div>
+    </div>
   `;
   cont.scrollIntoView({ behavior: 'smooth' });
 
-  const texto = `VENTA:${venta.ventaId}|EVENTO:${venta.nombreEvento}|BUTACAS:${venta.butacas.join(',')}|TOTAL:${venta.total}`;
+  const texto = `VENTA:${venta.ventaId}|EVENTO:${venta.nombreEvento}|FUNCION:${venta.funcionNombre}|BUTACAS:${venta.asientos.join(',')}|TOTAL:${venta.total}`;
   const canvas = document.getElementById('canvasComprobante');
   await QRCode.toCanvas(canvas, texto, { width: 200 });
+
+  document.getElementById('btnSubirComprobante').addEventListener('click', () => subirComprobantePago(venta.ventaId));
+}
+
+async function subirComprobantePago(ventaId) {
+  const input = document.getElementById('inputComprobante');
+  const msg = document.getElementById('msgComprobante');
+  ocultarMsg(msg);
+
+  if (!input.files || input.files.length === 0) {
+    mostrarMsg(msg, 'Selecciona una imagen del comprobante.', 'error');
+    return;
+  }
+  const file = input.files[0];
+  const base64 = await archivoABase64(file);
+  const boton = document.getElementById('btnSubirComprobante');
+  boton.disabled = true;
+  boton.textContent = 'Subiendo…';
+
+  try {
+    await llamarApi('subirComprobante', { ventaId, imagenBase64: base64, mimeType: file.type });
+    mostrarMsg(msg, 'Comprobante enviado. El colegio confirmará tu compra pronto.', 'ok');
+    boton.textContent = 'Comprobante enviado ✓';
+  } catch (err) {
+    mostrarMsg(msg, err.message, 'error');
+    boton.disabled = false;
+    boton.textContent = 'Subir comprobante';
+  }
 }
 
 // ---------- Admin: login ----------
@@ -218,11 +294,13 @@ async function cargarVentas() {
       const fecha = new Date(v.Fecha);
       tr.innerHTML = `
         <td>${v.ID}</td>
+        <td>${v.FuncionNombre}</td>
         <td>${isNaN(fecha) ? v.Fecha : fecha.toLocaleString()}</td>
         <td>${v.NombrePadre}</td>
         <td>${v.Celular}</td>
         <td>${v.Butacas}</td>
-        <td>S/ ${v.Total}</td>
+        <td>Bs ${v.Total}</td>
+        <td>${v.ComprobanteURL ? `<a href="${v.ComprobanteURL}" target="_blank" rel="noopener">Ver</a>` : '—'}</td>
         <td><span class="estado-pill ${v.Estado}">${v.Estado}</span></td>
         <td></td>
       `;

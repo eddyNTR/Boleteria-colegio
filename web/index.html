@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Venta de Butacas</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -23,6 +23,11 @@
 
     <div id="msgComprar" class="msg" hidden></div>
 
+    <div class="funcion-selector">
+      <label for="selectFuncion">Función (día)</label>
+      <select id="selectFuncion"></select>
+    </div>
+
     <div class="legend">
       <span><i class="dot disponible"></i> Disponible</span>
       <span><i class="dot seleccionada"></i> Seleccionada</span>
@@ -39,7 +44,7 @@
     <div class="summary-bar">
       <div>
         <strong id="cantidadSeleccionada">0</strong> butaca(s) —
-        Total: <strong>S/ <span id="totalSeleccionado">0</span></strong>
+        Total: <strong>Bs <span id="totalSeleccionado">0</span></strong>
       </div>
       <button id="btnRefrescar" class="btn-secundario" type="button">Actualizar mapa</button>
     </div>
@@ -90,8 +95,8 @@
           <table id="tablaVentas">
             <thead>
               <tr>
-                <th>ID</th><th>Fecha</th><th>Padre/Madre</th><th>Celular</th>
-                <th>Butacas</th><th>Total</th><th>Estado</th><th>Acciones</th>
+                <th>ID</th><th>Función</th><th>Fecha</th><th>Padre/Madre</th><th>Celular</th>
+                <th>Butacas</th><th>Total</th><th>Comprobante</th><th>Estado</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody></tbody>

@@ -3,13 +3,18 @@
  * Backend Google Apps Script — expone una API JSON (el Spreadsheet es la base de datos).
  * El frontend (carpeta /web) se despliega aparte en Vercel y llama a esta API.
  *
+ * Soporta varias "funciones" (ej. Miércoles 3 / Jueves 4) con mapas de butacas
+ * y ventas independientes entre sí, sobre la misma estructura de sala.
+ *
  * Hojas usadas:
  *  - Config    : Clave | Valor
- *  - Butacas   : ID | Fila | Numero | Estado | VentaID
- *  - Ventas    : ID | Fecha | NombrePadre | Celular | Butacas | Cantidad | PrecioUnitario | Total | Estado
+ *  - Funciones : ID | Nombre | Fecha
+ *  - Butacas   : ID | FuncionID | Fila | Numero | Estado | VentaID
+ *  - Ventas    : ID | FuncionID | Fecha | NombrePadre | Celular | Butacas | Cantidad | PrecioUnitario | Total | Estado | ComprobanteURL
  */
 
 const SHEET_CONFIG = 'Config';
+const SHEET_FUNCIONES = 'Funciones';
 const SHEET_BUTACAS = 'Butacas';
 const SHEET_VENTAS = 'Ventas';
 
@@ -26,14 +31,15 @@ const ESTADO_VENTA = {
 };
 
 // ---------- Enrutador HTTP ----------
-// GET  ?action=getDatosIniciales
+// GET  ?action=getDatosIniciales[&funcionId=MIE]
 // POST body JSON: { action: "crearVenta", params: {...} }
 // El frontend envía POST con Content-Type: text/plain para evitar el preflight CORS,
 // que Apps Script Web Apps no puede responder correctamente.
 
 const ACTIONS = {
-  getDatosIniciales: params => getDatosIniciales(),
-  crearVenta: params => crearVenta(params.nombrePadre, params.celular, params.butacasIds),
+  getDatosIniciales: params => getDatosIniciales(params.funcionId),
+  crearVenta: params => crearVenta(params.funcionId, params.nombrePadre, params.celular, params.asientos),
+  subirComprobante: params => subirComprobante(params.ventaId, params.imagenBase64, params.mimeType),
   adminLogin: params => adminLogin(params.password),
   adminGetVentas: params => adminGetVentas(params.password),
   adminConfirmarVenta: params => adminConfirmarVenta(params.password, params.ventaId),
@@ -114,7 +120,13 @@ function setConfigValue_(clave, valor) {
   sheet.appendRow([clave, valor]);
 }
 
+function getFunciones_() {
+  return sheetToObjects_(getSheet_(SHEET_FUNCIONES)).map(f => ({ id: f.ID, nombre: f.Nombre, fecha: f.Fecha }));
+}
+
 // ---------- Configuración inicial (ejecutar una vez desde el editor de Apps Script) ----------
+// Sala: filas A-P (16 filas), 19 butacas por fila, numeración continua 1-19,
+// con el pasillo central entre la butaca 9 y la 10 (solo visual en el frontend).
 
 function setupInicial() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -125,49 +137,66 @@ function setupInicial() {
     config.appendRow(['Clave', 'Valor']);
     config.appendRow(['NombreEvento', 'Evento Escolar']);
     config.appendRow(['PrecioButaca', 20]);
-    config.appendRow(['Filas', 8]);
-    config.appendRow(['ButacasPorFila', 10]);
+    config.appendRow(['Filas', 16]);
+    config.appendRow(['ButacasPorFila', 19]);
+    config.appendRow(['PasilloTrasNumero', 9]);
     config.appendRow(['AdminPassword', 'cambiar-esta-clave']);
     config.appendRow(['QRPagoURL', '']);
     config.appendRow(['QRPagoInfo', 'Yape / Plin al número del colegio']);
   }
 
+  let funciones = ss.getSheetByName(SHEET_FUNCIONES);
+  if (!funciones) funciones = ss.insertSheet(SHEET_FUNCIONES);
+  if (funciones.getLastRow() === 0) {
+    funciones.appendRow(['ID', 'Nombre', 'Fecha']);
+    funciones.appendRow(['MIE', 'Miércoles 3', '']);
+    funciones.appendRow(['JUE', 'Jueves 4', '']);
+  }
+
   let butacas = ss.getSheetByName(SHEET_BUTACAS);
   if (!butacas) butacas = ss.insertSheet(SHEET_BUTACAS);
   if (butacas.getLastRow() === 0) {
-    butacas.appendRow(['ID', 'Fila', 'Numero', 'Estado', 'VentaID']);
+    butacas.appendRow(['ID', 'FuncionID', 'Fila', 'Numero', 'Estado', 'VentaID']);
+  }
+  if (butacas.getLastRow() <= 1) {
     regenerarButacas_();
   }
 
   let ventas = ss.getSheetByName(SHEET_VENTAS);
   if (!ventas) ventas = ss.insertSheet(SHEET_VENTAS);
   if (ventas.getLastRow() === 0) {
-    ventas.appendRow(['ID', 'Fecha', 'NombrePadre', 'Celular', 'Butacas', 'Cantidad', 'PrecioUnitario', 'Total', 'Estado']);
+    ventas.appendRow(['ID', 'FuncionID', 'Fecha', 'NombrePadre', 'Celular', 'Butacas', 'Cantidad', 'PrecioUnitario', 'Total', 'Estado', 'ComprobanteURL']);
   }
 
   SpreadsheetApp.flush();
-  SpreadsheetApp.getUi().alert('Listo. Hojas Config, Butacas y Ventas inicializadas.');
+  SpreadsheetApp.getUi().alert('Listo. Hojas Config, Funciones, Butacas y Ventas inicializadas.');
 }
 
-// Regenera el mapa de butacas según Filas x ButacasPorFila de Config.
-// Borra cualquier venta existente sobre esas butacas, úsese solo en la configuración inicial.
+// Regenera el mapa de butacas de TODAS las funciones según Filas x ButacasPorFila de Config.
+// Borra cualquier venta existente sobre esas butacas — úsese solo en la configuración inicial
+// o si de verdad quieres reiniciar el mapa (perderás el estado de ventas ya registradas).
 function regenerarButacas_() {
-  const filas = Number(getConfigValue_('Filas')) || 8;
-  const porFila = Number(getConfigValue_('ButacasPorFila')) || 10;
+  const filas = Number(getConfigValue_('Filas')) || 16;
+  const porFila = Number(getConfigValue_('ButacasPorFila')) || 19;
+  const funciones = getFunciones_();
   const sheet = getSheet_(SHEET_BUTACAS);
+
   const filasExistentes = sheet.getLastRow() - 1;
   if (filasExistentes > 0) {
-    sheet.getRange(2, 1, filasExistentes, 5).clearContent();
+    sheet.getRange(2, 1, filasExistentes, 6).clearContent();
   }
 
   const rows = [];
-  for (let f = 0; f < filas; f++) {
-    const letra = String.fromCharCode(65 + f); // A, B, C...
-    for (let n = 1; n <= porFila; n++) {
-      rows.push([letra + n, letra, n, ESTADO_BUTACA.DISPONIBLE, '']);
+  funciones.forEach(fn => {
+    for (let f = 0; f < filas; f++) {
+      const letra = String.fromCharCode(65 + f); // A, B, C...
+      for (let n = 1; n <= porFila; n++) {
+        const id = fn.id + '-' + letra + n;
+        rows.push([id, fn.id, letra, n, ESTADO_BUTACA.DISPONIBLE, '']);
+      }
     }
-  }
-  sheet.getRange(2, 1, rows.length, 5).setValues(rows);
+  });
+  sheet.getRange(2, 1, rows.length, 6).setValues(rows);
 }
 
 // Función pública para poder ejecutarla desde el desplegable del editor
@@ -192,29 +221,42 @@ function mostrarUrlApp() {
 
 // ---------- API pública ----------
 
-function getDatosIniciales() {
-  const butacas = sheetToObjects_(getSheet_(SHEET_BUTACAS)).map(b => ({
-    id: b.ID, fila: b.Fila, numero: b.Numero, estado: b.Estado
-  }));
+function getDatosIniciales(funcionId) {
+  const funciones = getFunciones_();
+  if (funciones.length === 0) throw new Error('No hay funciones configuradas.');
+  const funcionActual = funciones.find(f => f.id === funcionId) || funciones[0];
+
+  const butacas = sheetToObjects_(getSheet_(SHEET_BUTACAS))
+    .filter(b => b.FuncionID === funcionActual.id)
+    .map(b => ({ id: b.ID, codigo: b.Fila + b.Numero, fila: b.Fila, numero: b.Numero, estado: b.Estado }));
+
   return {
     nombreEvento: getConfigValue_('NombreEvento'),
     precioButaca: Number(getConfigValue_('PrecioButaca')) || 0,
     filas: Number(getConfigValue_('Filas')) || 0,
     butacasPorFila: Number(getConfigValue_('ButacasPorFila')) || 0,
+    pasilloTrasNumero: Number(getConfigValue_('PasilloTrasNumero')) || 0,
     qrPagoURL: getConfigValue_('QRPagoURL') || '',
     qrPagoInfo: getConfigValue_('QRPagoInfo') || '',
+    funciones: funciones,
+    funcionActual: funcionActual.id,
     butacas: butacas
   };
 }
 
-// Crea una venta en estado "pendiente" y reserva las butacas seleccionadas.
+// Crea una venta en estado "pendiente" y reserva las butacas seleccionadas de una función.
 // Usa LockService para evitar que dos padres compren la misma butaca a la vez.
-function crearVenta(nombrePadre, celular, butacasIds) {
+// "asientos" son códigos simples como "A1" (sin el prefijo de la función).
+function crearVenta(funcionId, nombrePadre, celular, asientos) {
   nombrePadre = String(nombrePadre || '').trim();
   celular = String(celular || '').trim();
+  if (!funcionId) throw new Error('Falta indicar la función (día).');
+  if (!getFunciones_().some(f => f.id === funcionId)) throw new Error('Función inválida.');
   if (!nombrePadre) throw new Error('Falta el nombre del padre/madre.');
   if (!/^[0-9+ ]{6,15}$/.test(celular)) throw new Error('Número de celular inválido.');
-  if (!Array.isArray(butacasIds) || butacasIds.length === 0) throw new Error('Selecciona al menos una butaca.');
+  if (!Array.isArray(asientos) || asientos.length === 0) throw new Error('Selecciona al menos una butaca.');
+
+  const butacasIds = asientos.map(codigo => funcionId + '-' + codigo);
 
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -227,36 +269,70 @@ function crearVenta(nombrePadre, celular, butacasIds) {
     for (const id of butacasIds) {
       const row = idxById[id];
       if (row === undefined) throw new Error('Butaca inexistente: ' + id);
-      if (data[row][3] !== ESTADO_BUTACA.DISPONIBLE) {
+      if (data[row][4] !== ESTADO_BUTACA.DISPONIBLE) {
         throw new Error('La butaca ' + id + ' ya no está disponible. Actualiza la página e intenta de nuevo.');
       }
     }
 
     const precio = Number(getConfigValue_('PrecioButaca')) || 0;
     const ventaId = Utilities.getUuid().split('-')[0].toUpperCase();
-    const total = precio * butacasIds.length;
+    const total = precio * asientos.length;
 
     const ventasSheet = getSheet_(SHEET_VENTAS);
     ventasSheet.appendRow([
-      ventaId, new Date(), nombrePadre, celular,
-      butacasIds.join(', '), butacasIds.length, precio, total, ESTADO_VENTA.PENDIENTE
+      ventaId, funcionId, new Date(), nombrePadre, celular,
+      asientos.join(', '), asientos.length, precio, total, ESTADO_VENTA.PENDIENTE
     ]);
 
     for (const id of butacasIds) {
       const row = idxById[id];
-      sheet.getRange(row + 1, 4).setValue(ESTADO_BUTACA.RESERVADA);
-      sheet.getRange(row + 1, 5).setValue(ventaId);
+      sheet.getRange(row + 1, 5).setValue(ESTADO_BUTACA.RESERVADA);
+      sheet.getRange(row + 1, 6).setValue(ventaId);
     }
 
+    const funcion = getFunciones_().find(f => f.id === funcionId);
     return {
       ventaId: ventaId,
       total: total,
       nombreEvento: getConfigValue_('NombreEvento'),
-      butacas: butacasIds
+      funcionNombre: funcion ? funcion.nombre : funcionId,
+      asientos: asientos
     };
   } finally {
     lock.releaseLock();
   }
+}
+
+// El padre/comprador sube una foto/captura del comprobante de pago (Yape/Plin/transferencia)
+// justo después de reservar, para que el admin la revise antes de confirmar la venta.
+// No requiere clave de admin: cualquiera con el ventaId (que solo recibe el comprador) puede adjuntarla.
+function subirComprobante(ventaId, imagenBase64, mimeType) {
+  if (!ventaId) throw new Error('Falta el código de venta.');
+  if (!imagenBase64) throw new Error('No se recibió ninguna imagen.');
+
+  const ventasSheet = getSheet_(SHEET_VENTAS);
+  const vData = ventasSheet.getDataRange().getValues();
+  let ventaRow = -1;
+  for (let i = 1; i < vData.length; i++) {
+    if (vData[i][0] === ventaId) { ventaRow = i; break; }
+  }
+  if (ventaRow === -1) throw new Error('Venta no encontrada: ' + ventaId);
+
+  const folder = obtenerCarpetaComprobantes_();
+  const blob = Utilities.newBlob(Utilities.base64Decode(imagenBase64), mimeType, 'comprobante-' + ventaId);
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  const url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000';
+  ventasSheet.getRange(ventaRow + 1, 11).setValue(url); // columna ComprobanteURL
+  return url;
+}
+
+function obtenerCarpetaComprobantes_() {
+  const nombre = 'Boleteria_Comprobantes_Pago';
+  const it = DriveApp.getFoldersByName(nombre);
+  if (it.hasNext()) return it.next();
+  return DriveApp.createFolder(nombre);
 }
 
 // ---------- Panel admin ----------
@@ -273,7 +349,11 @@ function adminLogin(password) {
 
 function adminGetVentas(password) {
   verificarAdmin_(password);
-  return sheetToObjects_(getSheet_(SHEET_VENTAS)).sort((a, b) => new Date(b.Fecha) - new Date(a.Fecha));
+  const funcionesPorId = {};
+  getFunciones_().forEach(f => funcionesPorId[f.id] = f.nombre);
+  return sheetToObjects_(getSheet_(SHEET_VENTAS))
+    .map(v => Object.assign({}, v, { FuncionNombre: funcionesPorId[v.FuncionID] || v.FuncionID }))
+    .sort((a, b) => new Date(b.Fecha) - new Date(a.Fecha));
 }
 
 function adminConfirmarVenta(password, ventaId) {
@@ -299,15 +379,15 @@ function cambiarEstadoVenta_(ventaId, nuevoEstadoVenta, nuevoEstadoButaca) {
       if (vData[i][0] === ventaId) { ventaRow = i; break; }
     }
     if (ventaRow === -1) throw new Error('Venta no encontrada: ' + ventaId);
-    ventasSheet.getRange(ventaRow + 1, 9).setValue(nuevoEstadoVenta);
+    ventasSheet.getRange(ventaRow + 1, 10).setValue(nuevoEstadoVenta); // columna Estado
 
     const butacasSheet = getSheet_(SHEET_BUTACAS);
     const bData = butacasSheet.getDataRange().getValues();
     for (let i = 1; i < bData.length; i++) {
-      if (bData[i][4] === ventaId) {
-        butacasSheet.getRange(i + 1, 4).setValue(nuevoEstadoButaca);
+      if (bData[i][5] === ventaId) { // columna VentaID
+        butacasSheet.getRange(i + 1, 5).setValue(nuevoEstadoButaca); // columna Estado
         if (nuevoEstadoButaca === ESTADO_BUTACA.DISPONIBLE) {
-          butacasSheet.getRange(i + 1, 5).setValue('');
+          butacasSheet.getRange(i + 1, 6).setValue(''); // columna VentaID
         }
       }
     }
@@ -316,7 +396,7 @@ function cambiarEstadoVenta_(ventaId, nuevoEstadoVenta, nuevoEstadoButaca) {
   }
 }
 
-// Actualiza el QR de pago (imagen estática, ej. Yape/Plin). Solo admin.
+// Actualiza el QR de pago (imagen estática, ej. Yape/Plin). Solo admin. Se comparte entre todas las funciones.
 // imagenBase64 viene sin el prefijo "data:image/...;base64,"
 function adminActualizarQRPago(password, imagenBase64, mimeType, infoTexto) {
   verificarAdmin_(password);
