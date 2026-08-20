@@ -285,6 +285,14 @@ input[type="text"], input[type="tel"], input[type="password"], input[type="file"
   margin-bottom: 12px;
 }
 
+.input-buscar {
+  flex: 1 1 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--gris-borde);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
 .tabla-wrap {
   overflow-x: auto;
   background: #fff;

@@ -280,49 +280,72 @@ document.getElementById('btnLoginAdmin').addEventListener('click', async () => {
 });
 
 // ---------- Admin: ventas ----------
+let ventasCache = [];
+
 document.getElementById('btnRefrescarVentas').addEventListener('click', cargarVentas);
 document.getElementById('btnExportarSheet').addEventListener('click', () => {
   alert('Abre directamente el Google Sheet vinculado al proyecto de Apps Script (hoja "Ventas") para ver el historial completo.');
 });
 
+document.getElementById('buscarVentas').addEventListener('input', (e) => {
+  renderTablaVentas(filtrarVentas(ventasCache, e.target.value));
+});
+
+function filtrarVentas(ventas, termino) {
+  const t = termino.trim().toLowerCase();
+  if (!t) return ventas;
+  return ventas.filter(v => [v.ID, v.FuncionNombre, v.NombrePadre, v.Celular, v.Butacas, v.Estado]
+    .some(campo => String(campo || '').toLowerCase().includes(t)));
+}
+
 async function cargarVentas() {
   const msg = document.getElementById('msgVentas');
-  const tbody = document.querySelector('#tablaVentas tbody');
   try {
-    const ventas = await llamarApi('adminGetVentas', { password: adminPassword });
-    tbody.innerHTML = '';
-    ventas.forEach(v => {
-      const tr = document.createElement('tr');
-      const fecha = new Date(v.Fecha);
-      tr.innerHTML = `
-        <td>${v.ID}</td>
-        <td>${v.FuncionNombre}</td>
-        <td>${isNaN(fecha) ? v.Fecha : fecha.toLocaleString()}</td>
-        <td>${v.NombrePadre}</td>
-        <td>${v.Celular}</td>
-        <td>${v.Butacas}</td>
-        <td>Bs ${v.Total}</td>
-        <td>${v.ComprobanteURL ? `<a href="${v.ComprobanteURL}" target="_blank" rel="noopener">Ver</a>` : '—'}</td>
-        <td><span class="estado-pill ${v.Estado}">${v.Estado}</span></td>
-        <td></td>
-      `;
-      const tdAcciones = tr.querySelector('td:last-child');
-      if (v.Estado === 'pendiente') {
-        const btnOk = document.createElement('button');
-        btnOk.textContent = 'Confirmar';
-        btnOk.className = 'accion-btn confirmar';
-        btnOk.addEventListener('click', () => accionVenta(v.ID, 'adminConfirmarVenta'));
-        const btnNo = document.createElement('button');
-        btnNo.textContent = 'Cancelar';
-        btnNo.className = 'accion-btn cancelar';
-        btnNo.addEventListener('click', () => accionVenta(v.ID, 'adminCancelarVenta'));
-        tdAcciones.append(btnOk, btnNo);
-      }
-      tbody.appendChild(tr);
-    });
+    ventasCache = await llamarApi('adminGetVentas', { password: adminPassword });
+    const termino = document.getElementById('buscarVentas').value;
+    renderTablaVentas(filtrarVentas(ventasCache, termino));
     ocultarMsg(msg);
   } catch (err) {
     mostrarMsg(msg, err.message, 'error');
+  }
+}
+
+function renderTablaVentas(ventas) {
+  const tbody = document.querySelector('#tablaVentas tbody');
+  tbody.innerHTML = '';
+  ventas.forEach(v => {
+    const tr = document.createElement('tr');
+    const fecha = new Date(v.Fecha);
+    tr.innerHTML = `
+      <td>${v.ID}</td>
+      <td>${v.FuncionNombre}</td>
+      <td>${isNaN(fecha) ? v.Fecha : fecha.toLocaleString()}</td>
+      <td>${v.NombrePadre}</td>
+      <td>${v.Celular}</td>
+      <td>${v.Butacas}</td>
+      <td>Bs ${v.Total}</td>
+      <td>${v.ComprobanteURL ? `<a href="${v.ComprobanteURL}" target="_blank" rel="noopener">Ver</a>` : '—'}</td>
+      <td><span class="estado-pill ${v.Estado}">${v.Estado}</span></td>
+      <td></td>
+    `;
+    const tdAcciones = tr.querySelector('td:last-child');
+    if (v.Estado === 'pendiente') {
+      const btnOk = document.createElement('button');
+      btnOk.textContent = 'Confirmar';
+      btnOk.className = 'accion-btn confirmar';
+      btnOk.addEventListener('click', () => accionVenta(v.ID, 'adminConfirmarVenta'));
+      const btnNo = document.createElement('button');
+      btnNo.textContent = 'Cancelar';
+      btnNo.className = 'accion-btn cancelar';
+      btnNo.addEventListener('click', () => accionVenta(v.ID, 'adminCancelarVenta'));
+      tdAcciones.append(btnOk, btnNo);
+    }
+    tbody.appendChild(tr);
+  });
+  if (ventas.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="10" style="text-align:center;color:#64748b;">Sin resultados</td>`;
+    tbody.appendChild(tr);
   }
 }
 
