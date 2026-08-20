@@ -200,11 +200,16 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
   }
 });
 
-async function mostrarResultadoCompra(venta) {
+const LS_RESERVA_PENDIENTE = 'boleteria_reserva_pendiente';
+
+async function mostrarResultadoCompra(venta, recuperada) {
+  localStorage.setItem(LS_RESERVA_PENDIENTE, JSON.stringify(venta));
+
+  const minutos = (datosEvento && datosEvento.minutosExpiracionReserva) || 20;
   const cont = document.getElementById('resultadoCompra');
   cont.hidden = false;
   cont.innerHTML = `
-    <h2>¡Reserva registrada!</h2>
+    <h2>${recuperada ? 'Tienes una reserva pendiente' : '¡Reserva registrada!'}</h2>
     <p>Función: <strong>${venta.funcionNombre}</strong></p>
     <p>Código de venta: <strong>${venta.ventaId}</strong></p>
     <p>Butacas: <strong>${venta.asientos.join(', ')}</strong></p>
@@ -213,7 +218,7 @@ async function mostrarResultadoCompra(venta) {
     ${datosEvento.qrPagoURL ? `<img class="qr-img" src="${datosEvento.qrPagoURL}" alt="QR de pago">` : '<p><em>El colegio aún no configuró el QR de pago.</em></p>'}
     <p>Guarda este comprobante:</p>
     <canvas id="canvasComprobante"></canvas>
-    <p><small>Tu butaca queda <strong>reservada</strong> hasta que el colegio confirme tu pago.</small></p>
+    <p><small>⚠️ Si no subes tu comprobante de pago en los próximos <strong>${minutos} minutos</strong>, la reserva se cancela automáticamente y la butaca vuelve a estar disponible para otra persona.</small></p>
 
     <div class="subir-comprobante">
       <h3>Sube la captura de tu pago</h3>
@@ -224,6 +229,7 @@ async function mostrarResultadoCompra(venta) {
       </label>
       <button id="btnSubirComprobante" class="btn-primario" type="button">Subir comprobante</button>
       <div id="msgComprobante" class="msg" hidden></div>
+      <button id="btnDescartarReserva" class="btn-secundario" type="button" style="margin-top:8px;width:100%;">No es mi reserva / descartar</button>
     </div>
   `;
   cont.scrollIntoView({ behavior: 'smooth' });
@@ -231,6 +237,12 @@ async function mostrarResultadoCompra(venta) {
   const texto = `VENTA:${venta.ventaId}|EVENTO:${venta.nombreEvento}|FUNCION:${venta.funcionNombre}|BUTACAS:${venta.asientos.join(',')}|TOTAL:${venta.total}`;
   const canvas = document.getElementById('canvasComprobante');
   await QRCode.toCanvas(canvas, texto, { width: 200 });
+
+  document.getElementById('btnDescartarReserva').addEventListener('click', () => {
+    localStorage.removeItem(LS_RESERVA_PENDIENTE);
+    cont.hidden = true;
+    cont.innerHTML = '';
+  });
 
   document.getElementById('btnSubirComprobante').addEventListener('click', () => subirComprobantePago(venta.ventaId));
 }
@@ -252,8 +264,10 @@ async function subirComprobantePago(ventaId) {
 
   try {
     await llamarApi('subirComprobante', { ventaId, imagenBase64: base64, mimeType: file.type });
+    localStorage.removeItem(LS_RESERVA_PENDIENTE);
     mostrarMsg(msg, 'Comprobante enviado. El colegio confirmará tu compra pronto.', 'ok');
     boton.textContent = 'Comprobante enviado ✓';
+    document.getElementById('btnDescartarReserva').hidden = true;
   } catch (err) {
     mostrarMsg(msg, err.message, 'error');
     boton.disabled = false;
@@ -392,6 +406,18 @@ function revisarAccesoAdmin() {
   }
 }
 
+// ---------- Recuperar reserva pendiente (ej. si la página se refrescó por error) ----------
+function restaurarReservaPendiente() {
+  const guardada = localStorage.getItem(LS_RESERVA_PENDIENTE);
+  if (!guardada) return;
+  try {
+    const venta = JSON.parse(guardada);
+    mostrarResultadoCompra(venta, true);
+  } catch (err) {
+    localStorage.removeItem(LS_RESERVA_PENDIENTE);
+  }
+}
+
 // ---------- Inicio ----------
-cargarMapa();
+cargarMapa().then(restaurarReservaPendiente);
 revisarAccesoAdmin();

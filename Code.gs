@@ -140,6 +140,7 @@ function setupInicial() {
     config.appendRow(['Filas', 16]);
     config.appendRow(['ButacasPorFila', 19]);
     config.appendRow(['PasilloTrasNumero', 9]);
+    config.appendRow(['MinutosExpiracionReserva', 20]);
     config.appendRow(['AdminPassword', 'cambiar-esta-clave']);
     config.appendRow(['QRPagoURL', '']);
     config.appendRow(['QRPagoInfo', 'Yape / Plin al número del colegio']);
@@ -219,9 +220,31 @@ function mostrarUrlApp() {
   SpreadsheetApp.getUi().alert(url || 'Aún no se ha desplegado como Web App. Implementar > Nueva implementación > Aplicación web.');
 }
 
+// Cancela automáticamente las ventas "pendiente" que no subieron comprobante
+// dentro de MinutosExpiracionReserva, y libera sus butacas. Se llama al leer el
+// mapa y antes de crear una venta nueva, así no depende de un trigger programado.
+function liberarReservasVencidas_() {
+  const minutos = Number(getConfigValue_('MinutosExpiracionReserva')) || 20;
+  const limite = new Date(Date.now() - minutos * 60000);
+  const ventasSheet = getSheet_(SHEET_VENTAS);
+  const data = ventasSheet.getDataRange().getValues();
+  // Columnas: ID(0) FuncionID(1) Fecha(2) ... Estado(9) ComprobanteURL(10)
+  const vencidas = [];
+  for (let i = 1; i < data.length; i++) {
+    const estado = data[i][9];
+    const comprobante = data[i][10];
+    const fecha = data[i][2];
+    if (estado === ESTADO_VENTA.PENDIENTE && !comprobante && fecha instanceof Date && fecha < limite) {
+      vencidas.push(data[i][0]);
+    }
+  }
+  vencidas.forEach(ventaId => cambiarEstadoVenta_(ventaId, ESTADO_VENTA.CANCELADA, ESTADO_BUTACA.DISPONIBLE));
+}
+
 // ---------- API pública ----------
 
 function getDatosIniciales(funcionId) {
+  liberarReservasVencidas_();
   const funciones = getFunciones_();
   if (funciones.length === 0) throw new Error('No hay funciones configuradas.');
   const funcionActual = funciones.find(f => f.id === funcionId) || funciones[0];
@@ -236,6 +259,7 @@ function getDatosIniciales(funcionId) {
     filas: Number(getConfigValue_('Filas')) || 0,
     butacasPorFila: Number(getConfigValue_('ButacasPorFila')) || 0,
     pasilloTrasNumero: Number(getConfigValue_('PasilloTrasNumero')) || 0,
+    minutosExpiracionReserva: Number(getConfigValue_('MinutosExpiracionReserva')) || 20,
     qrPagoURL: getConfigValue_('QRPagoURL') || '',
     qrPagoInfo: getConfigValue_('QRPagoInfo') || '',
     funciones: funciones,
@@ -255,6 +279,8 @@ function crearVenta(funcionId, nombrePadre, celular, asientos) {
   if (!nombrePadre) throw new Error('Falta el nombre del padre/madre.');
   if (!/^[0-9+ ]{6,15}$/.test(celular)) throw new Error('Número de celular inválido.');
   if (!Array.isArray(asientos) || asientos.length === 0) throw new Error('Selecciona al menos una butaca.');
+
+  liberarReservasVencidas_();
 
   const butacasIds = asientos.map(codigo => funcionId + '-' + codigo);
 
