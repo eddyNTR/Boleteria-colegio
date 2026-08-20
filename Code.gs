@@ -40,6 +40,7 @@ const ACTIONS = {
   getDatosIniciales: params => getDatosIniciales(params.funcionId),
   crearVenta: params => crearVenta(params.funcionId, params.nombrePadre, params.celular, params.asientos),
   subirComprobante: params => subirComprobante(params.ventaId, params.imagenBase64, params.mimeType),
+  cancelarReservaPendiente: params => cancelarReservaPendiente(params.ventaId),
   adminLogin: params => adminLogin(params.password),
   adminGetVentas: params => adminGetVentas(params.password),
   adminConfirmarVenta: params => adminConfirmarVenta(params.password, params.ventaId),
@@ -140,7 +141,7 @@ function setupInicial() {
     config.appendRow(['Filas', 16]);
     config.appendRow(['ButacasPorFila', 19]);
     config.appendRow(['PasilloTrasNumero', 9]);
-    config.appendRow(['MinutosExpiracionReserva', 20]);
+    config.appendRow(['MinutosExpiracionReserva', 10]);
     config.appendRow(['AdminPassword', 'cambiar-esta-clave']);
     config.appendRow(['QRPagoURL', '']);
     config.appendRow(['QRPagoInfo', 'Yape / Plin al número del colegio']);
@@ -352,6 +353,27 @@ function subirComprobante(ventaId, imagenBase64, mimeType) {
   const url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000';
   ventasSheet.getRange(ventaRow + 1, 11).setValue(url); // columna ComprobanteURL
   return url;
+}
+
+// El navegador del comprador llama esto al cerrar/refrescar la página (vía sendBeacon)
+// si todavía no subió el comprobante, para liberar la butaca al instante en vez de
+// esperar a que expire por tiempo. Solo cancela si sigue "pendiente" y sin comprobante,
+// así no se puede usar para cancelar una venta ya confirmada o con pago ya enviado.
+function cancelarReservaPendiente(ventaId) {
+  if (!ventaId) return false;
+  const ventasSheet = getSheet_(SHEET_VENTAS);
+  const vData = ventasSheet.getDataRange().getValues();
+  for (let i = 1; i < vData.length; i++) {
+    if (vData[i][0] === ventaId) {
+      const estado = vData[i][9];
+      const comprobante = vData[i][10];
+      if (estado === ESTADO_VENTA.PENDIENTE && !comprobante) {
+        cambiarEstadoVenta_(ventaId, ESTADO_VENTA.CANCELADA, ESTADO_BUTACA.DISPONIBLE);
+      }
+      break;
+    }
+  }
+  return true;
 }
 
 function obtenerCarpetaComprobantes_() {

@@ -201,11 +201,24 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
 });
 
 const LS_RESERVA_PENDIENTE = 'boleteria_reserva_pendiente';
+let ventaIdSinComprobante = null; // venta activa que aún no subió comprobante (para liberarla al refrescar/cerrar)
+
+// Si se refresca o cierra la página sin haber subido el comprobante, liberamos la butaca
+// al instante en vez de esperar el tiempo límite. event.persisted=true significa que el
+// navegador solo la puso en segundo plano (ej. el usuario fue a pagar a otra app) y no
+// la cerró de verdad, así que en ese caso NO cancelamos.
+window.addEventListener('pagehide', (e) => {
+  if (!e.persisted && ventaIdSinComprobante) {
+    const body = JSON.stringify({ action: 'cancelarReservaPendiente', params: { ventaId: ventaIdSinComprobante } });
+    navigator.sendBeacon(APPS_SCRIPT_URL, new Blob([body], { type: 'text/plain;charset=utf-8' }));
+  }
+});
 
 async function mostrarResultadoCompra(venta, recuperada) {
   localStorage.setItem(LS_RESERVA_PENDIENTE, JSON.stringify(venta));
+  ventaIdSinComprobante = venta.ventaId;
 
-  const minutos = (datosEvento && datosEvento.minutosExpiracionReserva) || 20;
+  const minutos = (datosEvento && datosEvento.minutosExpiracionReserva) || 10;
   const cont = document.getElementById('resultadoCompra');
   cont.hidden = false;
   cont.innerHTML = `
@@ -218,7 +231,7 @@ async function mostrarResultadoCompra(venta, recuperada) {
     ${datosEvento.qrPagoURL ? `<img class="qr-img" src="${datosEvento.qrPagoURL}" alt="QR de pago">` : '<p><em>El colegio aún no configuró el QR de pago.</em></p>'}
     <p>Guarda este comprobante:</p>
     <canvas id="canvasComprobante"></canvas>
-    <p><small>⚠️ Si no subes tu comprobante de pago en los próximos <strong>${minutos} minutos</strong>, la reserva se cancela automáticamente y la butaca vuelve a estar disponible para otra persona.</small></p>
+    <p><small>⚠️ Tu butaca no queda confirmada hasta que subas el comprobante. Si cierras o refrescas esta página antes de subirlo, la reserva se cancela y la butaca queda libre para otra persona (también se libera sola después de ${minutos} minutos por si acaso).</small></p>
 
     <div class="subir-comprobante">
       <h3>Sube la captura de tu pago</h3>
@@ -238,10 +251,13 @@ async function mostrarResultadoCompra(venta, recuperada) {
   const canvas = document.getElementById('canvasComprobante');
   await QRCode.toCanvas(canvas, texto, { width: 200 });
 
-  document.getElementById('btnDescartarReserva').addEventListener('click', () => {
+  document.getElementById('btnDescartarReserva').addEventListener('click', async () => {
     localStorage.removeItem(LS_RESERVA_PENDIENTE);
+    ventaIdSinComprobante = null;
     cont.hidden = true;
     cont.innerHTML = '';
+    try { await llamarApi('cancelarReservaPendiente', { ventaId: venta.ventaId }); } catch (err) { /* no crítico */ }
+    cargarMapa(funcionActual);
   });
 
   document.getElementById('btnSubirComprobante').addEventListener('click', () => subirComprobantePago(venta.ventaId));
@@ -265,6 +281,7 @@ async function subirComprobantePago(ventaId) {
   try {
     await llamarApi('subirComprobante', { ventaId, imagenBase64: base64, mimeType: file.type });
     localStorage.removeItem(LS_RESERVA_PENDIENTE);
+    ventaIdSinComprobante = null;
     mostrarMsg(msg, 'Comprobante enviado. El colegio confirmará tu compra pronto.', 'ok');
     boton.textContent = 'Comprobante enviado ✓';
     document.getElementById('btnDescartarReserva').hidden = true;
