@@ -86,6 +86,7 @@ async function cargarMapa(funcionId) {
     document.title = datosEvento.nombreEvento || 'Venta de Butacas';
     poblarSelectorFunciones();
     renderMapa();
+    actualizarQrPagoEnFormulario();
     ocultarMsg(msg);
   } catch (err) {
     mostrarMsg(msg, 'No se pudo cargar el mapa de butacas: ' + err.message, 'error');
@@ -163,11 +164,37 @@ function actualizarResumen() {
   document.getElementById('cantidadSeleccionada').textContent = seleccionadas.size;
   const total = seleccionadas.size * (datosEvento ? datosEvento.precioButaca : 0);
   document.getElementById('totalSeleccionado').textContent = total;
+  actualizarQrPagoEnFormulario();
+}
+
+// Muestra el QR de pago y el monto dentro del propio formulario, antes de comprar.
+function actualizarQrPagoEnFormulario() {
+  const img = document.getElementById('qrPagoImg');
+  const texto = document.getElementById('qrPagoInfoTexto');
+  if (!datosEvento) return;
+
+  if (seleccionadas.size === 0) {
+    texto.innerHTML = '<small>Selecciona butacas arriba para ver el monto exacto.</small>';
+    img.hidden = true;
+    return;
+  }
+
+  const total = seleccionadas.size * datosEvento.precioButaca;
+  texto.innerHTML = `Monto a pagar: <strong>Bs ${total}</strong> — ${datosEvento.qrPagoInfo || 'ver con administración'}`;
+  if (datosEvento.qrPagoURL) {
+    img.src = datosEvento.qrPagoURL;
+    img.hidden = false;
+  } else {
+    img.hidden = true;
+  }
 }
 
 document.getElementById('btnRefrescar').addEventListener('click', () => cargarMapa(funcionActual));
 
 // ---------- Formulario de compra ----------
+// Todo se envía junto (asientos + datos + comprobante) en un solo paso: la butaca
+// recién se bloquea cuando la venta ya está completa con el comprobante adjunto.
+// Así, si el padre refresca o cierra antes de terminar, no queda nada reservado.
 document.getElementById('formCompra').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('msgComprar');
@@ -180,14 +207,30 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
 
   const nombrePadre = document.getElementById('nombrePadre').value.trim();
   const celularPadre = document.getElementById('celularPadre').value.trim();
+  const inputComprobante = document.getElementById('inputComprobante');
+
+  if (!inputComprobante.files || inputComprobante.files.length === 0) {
+    mostrarMsg(msg, 'Adjunta la imagen del comprobante de pago.', 'error');
+    return;
+  }
+
   const boton = e.target.querySelector('button[type="submit"]');
   boton.disabled = true;
   boton.textContent = 'Procesando…';
 
   try {
+    const file = inputComprobante.files[0];
+    const base64 = await archivoABase64(file);
+
     const venta = await llamarApi('crearVenta', {
-      funcionId: funcionActual, nombrePadre, celular: celularPadre, asientos: Array.from(seleccionadas)
+      funcionId: funcionActual,
+      nombrePadre,
+      celular: celularPadre,
+      asientos: Array.from(seleccionadas),
+      imagenBase64: base64,
+      mimeType: file.type
     });
+
     mostrarResultadoCompra(venta);
     seleccionadas.clear();
     e.target.reset();
@@ -196,100 +239,28 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
     mostrarMsg(msg, err.message, 'error');
   } finally {
     boton.disabled = false;
-    boton.textContent = 'Reservar butacas seleccionadas';
+    boton.textContent = 'Confirmar compra';
   }
 });
 
-const LS_RESERVA_PENDIENTE = 'boleteria_reserva_pendiente';
-let ventaIdSinComprobante = null; // venta activa que aún no subió comprobante (para liberarla al refrescar/cerrar)
-
-// Si se refresca o cierra la página sin haber subido el comprobante, liberamos la butaca
-// al instante en vez de esperar el tiempo límite. event.persisted=true significa que el
-// navegador solo la puso en segundo plano (ej. el usuario fue a pagar a otra app) y no
-// la cerró de verdad, así que en ese caso NO cancelamos.
-window.addEventListener('pagehide', (e) => {
-  if (!e.persisted && ventaIdSinComprobante) {
-    const body = JSON.stringify({ action: 'cancelarReservaPendiente', params: { ventaId: ventaIdSinComprobante } });
-    navigator.sendBeacon(APPS_SCRIPT_URL, new Blob([body], { type: 'text/plain;charset=utf-8' }));
-  }
-});
-
-async function mostrarResultadoCompra(venta, recuperada) {
-  localStorage.setItem(LS_RESERVA_PENDIENTE, JSON.stringify(venta));
-  ventaIdSinComprobante = venta.ventaId;
-
-  const minutos = (datosEvento && datosEvento.minutosExpiracionReserva) || 10;
+async function mostrarResultadoCompra(venta) {
   const cont = document.getElementById('resultadoCompra');
   cont.hidden = false;
   cont.innerHTML = `
-    <h2>${recuperada ? 'Tienes una reserva pendiente' : '¡Reserva registrada!'}</h2>
+    <h2>¡Compra registrada!</h2>
     <p>Función: <strong>${venta.funcionNombre}</strong></p>
     <p>Código de venta: <strong>${venta.ventaId}</strong></p>
     <p>Butacas: <strong>${venta.asientos.join(', ')}</strong></p>
-    <p>Total a pagar: <strong>Bs ${venta.total}</strong></p>
-    <p>Escanea el QR de pago (${datosEvento.qrPagoInfo || 'ver con administración'}):</p>
-    ${datosEvento.qrPagoURL ? `<img class="qr-img" src="${datosEvento.qrPagoURL}" alt="QR de pago">` : '<p><em>El colegio aún no configuró el QR de pago.</em></p>'}
+    <p>Total pagado: <strong>Bs ${venta.total}</strong></p>
     <p>Guarda este comprobante:</p>
     <canvas id="canvasComprobante"></canvas>
-    <p><small>⚠️ Tu butaca no queda confirmada hasta que subas el comprobante. Si cierras o refrescas esta página antes de subirlo, la reserva se cancela y la butaca queda libre para otra persona (también se libera sola después de ${minutos} minutos por si acaso).</small></p>
-
-    <div class="subir-comprobante">
-      <h3>Sube la captura de tu pago</h3>
-      <p><small>Foto o captura de pantalla del Yape/Plin/transferencia, para que el colegio confirme más rápido.</small></p>
-      <label>
-        Imagen del comprobante
-        <input type="file" id="inputComprobante" accept="image/*">
-      </label>
-      <button id="btnSubirComprobante" class="btn-primario" type="button">Subir comprobante</button>
-      <div id="msgComprobante" class="msg" hidden></div>
-      <button id="btnDescartarReserva" class="btn-secundario" type="button" style="margin-top:8px;width:100%;">No es mi reserva / descartar</button>
-    </div>
+    <p><small>Tu butaca queda <strong>reservada</strong> hasta que el colegio confirme tu pago.</small></p>
   `;
   cont.scrollIntoView({ behavior: 'smooth' });
 
   const texto = `VENTA:${venta.ventaId}|EVENTO:${venta.nombreEvento}|FUNCION:${venta.funcionNombre}|BUTACAS:${venta.asientos.join(',')}|TOTAL:${venta.total}`;
   const canvas = document.getElementById('canvasComprobante');
   await QRCode.toCanvas(canvas, texto, { width: 200 });
-
-  document.getElementById('btnDescartarReserva').addEventListener('click', async () => {
-    localStorage.removeItem(LS_RESERVA_PENDIENTE);
-    ventaIdSinComprobante = null;
-    cont.hidden = true;
-    cont.innerHTML = '';
-    try { await llamarApi('cancelarReservaPendiente', { ventaId: venta.ventaId }); } catch (err) { /* no crítico */ }
-    cargarMapa(funcionActual);
-  });
-
-  document.getElementById('btnSubirComprobante').addEventListener('click', () => subirComprobantePago(venta.ventaId));
-}
-
-async function subirComprobantePago(ventaId) {
-  const input = document.getElementById('inputComprobante');
-  const msg = document.getElementById('msgComprobante');
-  ocultarMsg(msg);
-
-  if (!input.files || input.files.length === 0) {
-    mostrarMsg(msg, 'Selecciona una imagen del comprobante.', 'error');
-    return;
-  }
-  const file = input.files[0];
-  const base64 = await archivoABase64(file);
-  const boton = document.getElementById('btnSubirComprobante');
-  boton.disabled = true;
-  boton.textContent = 'Subiendo…';
-
-  try {
-    await llamarApi('subirComprobante', { ventaId, imagenBase64: base64, mimeType: file.type });
-    localStorage.removeItem(LS_RESERVA_PENDIENTE);
-    ventaIdSinComprobante = null;
-    mostrarMsg(msg, 'Comprobante enviado. El colegio confirmará tu compra pronto.', 'ok');
-    boton.textContent = 'Comprobante enviado ✓';
-    document.getElementById('btnDescartarReserva').hidden = true;
-  } catch (err) {
-    mostrarMsg(msg, err.message, 'error');
-    boton.disabled = false;
-    boton.textContent = 'Subir comprobante';
-  }
 }
 
 // ---------- Admin: login ----------
@@ -423,18 +394,6 @@ function revisarAccesoAdmin() {
   }
 }
 
-// ---------- Recuperar reserva pendiente (ej. si la página se refrescó por error) ----------
-function restaurarReservaPendiente() {
-  const guardada = localStorage.getItem(LS_RESERVA_PENDIENTE);
-  if (!guardada) return;
-  try {
-    const venta = JSON.parse(guardada);
-    mostrarResultadoCompra(venta, true);
-  } catch (err) {
-    localStorage.removeItem(LS_RESERVA_PENDIENTE);
-  }
-}
-
 // ---------- Inicio ----------
-cargarMapa().then(restaurarReservaPendiente);
+cargarMapa();
 revisarAccesoAdmin();

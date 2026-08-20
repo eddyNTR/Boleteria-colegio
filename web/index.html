@@ -50,7 +50,7 @@
     </div>
 
     <form id="formCompra" class="form-compra">
-      <h2>Datos del padre/madre</h2>
+      <h2>1. Datos del padre/madre</h2>
       <label>
         Nombre completo
         <input type="text" id="nombrePadre" required placeholder="Ej. María Pérez">
@@ -59,7 +59,19 @@
         Número de celular
         <input type="tel" id="celularPadre" required placeholder="Ej. 987654321">
       </label>
-      <button type="submit" class="btn-primario">Reservar butacas seleccionadas</button>
+
+      <h2>2. Paga escaneando este QR</h2>
+      <p id="qrPagoInfoTexto"><small>Selecciona butacas arriba para ver el monto exacto.</small></p>
+      <img id="qrPagoImg" class="qr-img" alt="QR de pago" hidden>
+
+      <h2>3. Adjunta tu comprobante de pago</h2>
+      <p><small>Foto o captura de pantalla del Yape/Plin/transferencia. Sin esto no se puede completar la reserva.</small></p>
+      <label>
+        Imagen del comprobante
+        <input type="file" id="inputComprobante" accept="image/*" required>
+      </label>
+
+      <button type="submit" class="btn-primario">Confirmar compra</button>
     </form>
 
     <div id="resultadoCompra" class="resultado-compra" hidden></div>

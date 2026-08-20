@@ -38,9 +38,7 @@ const ESTADO_VENTA = {
 
 const ACTIONS = {
   getDatosIniciales: params => getDatosIniciales(params.funcionId),
-  crearVenta: params => crearVenta(params.funcionId, params.nombrePadre, params.celular, params.asientos),
-  subirComprobante: params => subirComprobante(params.ventaId, params.imagenBase64, params.mimeType),
-  cancelarReservaPendiente: params => cancelarReservaPendiente(params.ventaId),
+  crearVenta: params => crearVenta(params.funcionId, params.nombrePadre, params.celular, params.asientos, params.imagenBase64, params.mimeType),
   adminLogin: params => adminLogin(params.password),
   adminGetVentas: params => adminGetVentas(params.password),
   adminConfirmarVenta: params => adminConfirmarVenta(params.password, params.ventaId),
@@ -100,29 +98,47 @@ function sheetToObjects_(sheet) {
     });
 }
 
-function getConfigValue_(clave) {
-  const sheet = getSheet_(SHEET_CONFIG);
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === clave) return data[i][1];
+// Cachea la hoja Config en memoria durante la ejecución actual (cada request a la Web App
+// es una ejecución nueva, así que esto no queda "viejo" entre usuarios). Sin esto,
+// getDatosIniciales terminaba leyendo la hoja Config completa 7 veces por carga.
+let configCache_ = null;
+
+function getConfigMap_() {
+  if (!configCache_) {
+    const data = getSheet_(SHEET_CONFIG).getDataRange().getValues();
+    configCache_ = {};
+    for (let i = 1; i < data.length; i++) configCache_[data[i][0]] = data[i][1];
   }
-  return null;
+  return configCache_;
+}
+
+function getConfigValue_(clave) {
+  const map = getConfigMap_();
+  return Object.prototype.hasOwnProperty.call(map, clave) ? map[clave] : null;
 }
 
 function setConfigValue_(clave, valor) {
   const sheet = getSheet_(SHEET_CONFIG);
   const data = sheet.getDataRange().getValues();
+  let escrito = false;
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === clave) {
       sheet.getRange(i + 1, 2).setValue(valor);
-      return;
+      escrito = true;
+      break;
     }
   }
-  sheet.appendRow([clave, valor]);
+  if (!escrito) sheet.appendRow([clave, valor]);
+  if (configCache_) configCache_[clave] = valor;
 }
 
+let funcionesCache_ = null;
+
 function getFunciones_() {
-  return sheetToObjects_(getSheet_(SHEET_FUNCIONES)).map(f => ({ id: f.ID, nombre: f.Nombre, fecha: f.Fecha }));
+  if (!funcionesCache_) {
+    funcionesCache_ = sheetToObjects_(getSheet_(SHEET_FUNCIONES)).map(f => ({ id: f.ID, nombre: f.Nombre, fecha: f.Fecha }));
+  }
+  return funcionesCache_;
 }
 
 // ---------- Configuración inicial (ejecutar una vez desde el editor de Apps Script) ----------
@@ -141,7 +157,6 @@ function setupInicial() {
     config.appendRow(['Filas', 16]);
     config.appendRow(['ButacasPorFila', 19]);
     config.appendRow(['PasilloTrasNumero', 9]);
-    config.appendRow(['MinutosExpiracionReserva', 10]);
     config.appendRow(['AdminPassword', 'cambiar-esta-clave']);
     config.appendRow(['QRPagoURL', '']);
     config.appendRow(['QRPagoInfo', 'Yape / Plin al número del colegio']);
@@ -221,31 +236,9 @@ function mostrarUrlApp() {
   SpreadsheetApp.getUi().alert(url || 'Aún no se ha desplegado como Web App. Implementar > Nueva implementación > Aplicación web.');
 }
 
-// Cancela automáticamente las ventas "pendiente" que no subieron comprobante
-// dentro de MinutosExpiracionReserva, y libera sus butacas. Se llama al leer el
-// mapa y antes de crear una venta nueva, así no depende de un trigger programado.
-function liberarReservasVencidas_() {
-  const minutos = Number(getConfigValue_('MinutosExpiracionReserva')) || 20;
-  const limite = new Date(Date.now() - minutos * 60000);
-  const ventasSheet = getSheet_(SHEET_VENTAS);
-  const data = ventasSheet.getDataRange().getValues();
-  // Columnas: ID(0) FuncionID(1) Fecha(2) ... Estado(9) ComprobanteURL(10)
-  const vencidas = [];
-  for (let i = 1; i < data.length; i++) {
-    const estado = data[i][9];
-    const comprobante = data[i][10];
-    const fecha = data[i][2];
-    if (estado === ESTADO_VENTA.PENDIENTE && !comprobante && fecha instanceof Date && fecha < limite) {
-      vencidas.push(data[i][0]);
-    }
-  }
-  vencidas.forEach(ventaId => cambiarEstadoVenta_(ventaId, ESTADO_VENTA.CANCELADA, ESTADO_BUTACA.DISPONIBLE));
-}
-
 // ---------- API pública ----------
 
 function getDatosIniciales(funcionId) {
-  liberarReservasVencidas_();
   const funciones = getFunciones_();
   if (funciones.length === 0) throw new Error('No hay funciones configuradas.');
   const funcionActual = funciones.find(f => f.id === funcionId) || funciones[0];
@@ -260,7 +253,6 @@ function getDatosIniciales(funcionId) {
     filas: Number(getConfigValue_('Filas')) || 0,
     butacasPorFila: Number(getConfigValue_('ButacasPorFila')) || 0,
     pasilloTrasNumero: Number(getConfigValue_('PasilloTrasNumero')) || 0,
-    minutosExpiracionReserva: Number(getConfigValue_('MinutosExpiracionReserva')) || 20,
     qrPagoURL: getConfigValue_('QRPagoURL') || '',
     qrPagoInfo: getConfigValue_('QRPagoInfo') || '',
     funciones: funciones,
@@ -269,10 +261,13 @@ function getDatosIniciales(funcionId) {
   };
 }
 
-// Crea una venta en estado "pendiente" y reserva las butacas seleccionadas de una función.
+// Crea la venta y reserva las butacas SOLO si ya viene con el comprobante de pago adjunto.
+// Así, si el padre cierra o refresca la página antes de terminar el formulario completo
+// (asientos + datos + comprobante), no queda ninguna butaca bloqueada — nunca se llegó
+// a enviar nada al servidor. No hace falta expirar reservas ni recuperarlas.
 // Usa LockService para evitar que dos padres compren la misma butaca a la vez.
 // "asientos" son códigos simples como "A1" (sin el prefijo de la función).
-function crearVenta(funcionId, nombrePadre, celular, asientos) {
+function crearVenta(funcionId, nombrePadre, celular, asientos, imagenBase64, mimeType) {
   nombrePadre = String(nombrePadre || '').trim();
   celular = String(celular || '').trim();
   if (!funcionId) throw new Error('Falta indicar la función (día).');
@@ -280,8 +275,7 @@ function crearVenta(funcionId, nombrePadre, celular, asientos) {
   if (!nombrePadre) throw new Error('Falta el nombre del padre/madre.');
   if (!/^[0-9+ ]{6,15}$/.test(celular)) throw new Error('Número de celular inválido.');
   if (!Array.isArray(asientos) || asientos.length === 0) throw new Error('Selecciona al menos una butaca.');
-
-  liberarReservasVencidas_();
+  if (!imagenBase64) throw new Error('Falta el comprobante de pago.');
 
   const butacasIds = asientos.map(codigo => funcionId + '-' + codigo);
 
@@ -305,10 +299,16 @@ function crearVenta(funcionId, nombrePadre, celular, asientos) {
     const ventaId = Utilities.getUuid().split('-')[0].toUpperCase();
     const total = precio * asientos.length;
 
+    const folder = obtenerCarpetaComprobantes_();
+    const blob = Utilities.newBlob(Utilities.base64Decode(imagenBase64), mimeType, 'comprobante-' + ventaId);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const comprobanteUrl = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000';
+
     const ventasSheet = getSheet_(SHEET_VENTAS);
     ventasSheet.appendRow([
       ventaId, funcionId, new Date(), nombrePadre, celular,
-      asientos.join(', '), asientos.length, precio, total, ESTADO_VENTA.PENDIENTE
+      asientos.join(', '), asientos.length, precio, total, ESTADO_VENTA.PENDIENTE, comprobanteUrl
     ]);
 
     for (const id of butacasIds) {
@@ -328,52 +328,6 @@ function crearVenta(funcionId, nombrePadre, celular, asientos) {
   } finally {
     lock.releaseLock();
   }
-}
-
-// El padre/comprador sube una foto/captura del comprobante de pago (Yape/Plin/transferencia)
-// justo después de reservar, para que el admin la revise antes de confirmar la venta.
-// No requiere clave de admin: cualquiera con el ventaId (que solo recibe el comprador) puede adjuntarla.
-function subirComprobante(ventaId, imagenBase64, mimeType) {
-  if (!ventaId) throw new Error('Falta el código de venta.');
-  if (!imagenBase64) throw new Error('No se recibió ninguna imagen.');
-
-  const ventasSheet = getSheet_(SHEET_VENTAS);
-  const vData = ventasSheet.getDataRange().getValues();
-  let ventaRow = -1;
-  for (let i = 1; i < vData.length; i++) {
-    if (vData[i][0] === ventaId) { ventaRow = i; break; }
-  }
-  if (ventaRow === -1) throw new Error('Venta no encontrada: ' + ventaId);
-
-  const folder = obtenerCarpetaComprobantes_();
-  const blob = Utilities.newBlob(Utilities.base64Decode(imagenBase64), mimeType, 'comprobante-' + ventaId);
-  const file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-  const url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000';
-  ventasSheet.getRange(ventaRow + 1, 11).setValue(url); // columna ComprobanteURL
-  return url;
-}
-
-// El navegador del comprador llama esto al cerrar/refrescar la página (vía sendBeacon)
-// si todavía no subió el comprobante, para liberar la butaca al instante en vez de
-// esperar a que expire por tiempo. Solo cancela si sigue "pendiente" y sin comprobante,
-// así no se puede usar para cancelar una venta ya confirmada o con pago ya enviado.
-function cancelarReservaPendiente(ventaId) {
-  if (!ventaId) return false;
-  const ventasSheet = getSheet_(SHEET_VENTAS);
-  const vData = ventasSheet.getDataRange().getValues();
-  for (let i = 1; i < vData.length; i++) {
-    if (vData[i][0] === ventaId) {
-      const estado = vData[i][9];
-      const comprobante = vData[i][10];
-      if (estado === ESTADO_VENTA.PENDIENTE && !comprobante) {
-        cambiarEstadoVenta_(ventaId, ESTADO_VENTA.CANCELADA, ESTADO_BUTACA.DISPONIBLE);
-      }
-      break;
-    }
-  }
-  return true;
 }
 
 function obtenerCarpetaComprobantes_() {
