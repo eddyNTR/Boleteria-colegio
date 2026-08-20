@@ -63,6 +63,12 @@ main {
   padding: 16px;
 }
 
+/* La pestaña Admin tiene una tabla ancha (Ventas), así que le damos más espacio
+   que a la vista de compra (que se mantiene angosta para que se vea bien en celular). */
+main:has(#tab-admin.active) {
+  max-width: 1200px;
+}
+
 .tab-panel, .subtab-panel { display: none; }
 .tab-panel.active, .subtab-panel.active { display: block; }
 
@@ -285,8 +291,8 @@ input[type="text"], input[type="tel"], input[type="password"], input[type="file"
   border-radius: var(--radio);
 }
 
-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
-th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
 th { background: #f1f5f9; }
 
 .estado-pill {
