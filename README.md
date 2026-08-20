@@ -3,7 +3,7 @@
 Sistema simple para vender butacas de un evento escolar:
 - Mapa de butacas visual (disponible / reservada / vendida).
 - Los padres seleccionan una o varias butacas, dejan su nombre y celular, y reciben un QR de comprobante.
-- El pago se hace por fuera del sistema (Yape/Plin/transferencia) usando un QR de pago **estático que solo el administrador puede cambiar**.
+- El pago se hace por fuera del sistema usando un QR de pago **estático que solo el administrador puede cambiar**.
 - Panel de administración (rol `admin`) para confirmar/cancelar ventas y ver todo en Google Sheets.
 - Rol `padre/comprador`: solo compra, no necesita cuenta ni contraseña.
 
@@ -73,5 +73,5 @@ npx vercel --prod
 
 - No hay contraseñas para padres: es solo nombre + celular, pensado para un evento puntual, no un sistema con cuentas persistentes.
 - La clave de administrador se valida en el servidor (Apps Script) en cada acción, pero viaja en texto plano — suficiente para este caso de uso, no para datos sensibles.
-- La verificación del pago es manual (el admin revisa que llegó la transferencia/Yape y confirma en el panel); el sistema no procesa pagos automáticamente.
+- La verificación del pago es manual (el admin revisa que llegó el pago y confirma en el panel); el sistema no procesa pagos automáticamente.
 - Si necesitan más de un evento a la vez, hay que duplicar el Google Sheet + implementación de Apps Script.

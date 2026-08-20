@@ -10,7 +10,7 @@
  *  - Config    : Clave | Valor
  *  - Funciones : ID | Nombre | Fecha
  *  - Butacas   : ID | FuncionID | Fila | Numero | Estado | VentaID
- *  - Ventas    : ID | FuncionID | Fecha | NombrePadre | Celular | Butacas | Cantidad | PrecioUnitario | Total | Estado | ComprobanteURL
+ *  - Ventas    : ID | FuncionID | Fecha | NombrePadre | Celular | Butacas | Cantidad | PrecioUnitario | Total | Estado | ComprobanteURL | MetodoPago
  */
 
 const SHEET_CONFIG = 'Config';
@@ -30,6 +30,11 @@ const ESTADO_VENTA = {
   CANCELADA: 'cancelada'
 };
 
+const METODO_PAGO = {
+  QR: 'qr',
+  EFECTIVO: 'efectivo'
+};
+
 // ---------- Enrutador HTTP ----------
 // GET  ?action=getDatosIniciales[&funcionId=MIE]
 // POST body JSON: { action: "crearVenta", params: {...} }
@@ -38,12 +43,13 @@ const ESTADO_VENTA = {
 
 const ACTIONS = {
   getDatosIniciales: params => getDatosIniciales(params.funcionId),
-  crearVenta: params => crearVenta(params.funcionId, params.nombrePadre, params.celular, params.asientos, params.imagenBase64, params.mimeType),
+  crearVenta: params => crearVenta(params.funcionId, params.nombrePadre, params.celular, params.asientos, params.metodoPago, params.imagenBase64, params.mimeType),
   adminLogin: params => adminLogin(params.password),
   adminGetVentas: params => adminGetVentas(params.password),
   adminConfirmarVenta: params => adminConfirmarVenta(params.password, params.ventaId),
   adminCancelarVenta: params => adminCancelarVenta(params.password, params.ventaId),
-  adminActualizarQRPago: params => adminActualizarQRPago(params.password, params.imagenBase64, params.mimeType, params.infoTexto)
+  adminActualizarQRPago: params => adminActualizarQRPago(params.password, params.imagenBase64, params.mimeType, params.infoTexto),
+  adminActualizarFuncion: params => adminActualizarFuncion(params.password, params.funcionId, params.nombre)
 };
 
 function doGet(e) {
@@ -159,7 +165,7 @@ function setupInicial() {
     config.appendRow(['PasilloTrasNumero', 9]);
     config.appendRow(['AdminPassword', 'cambiar-esta-clave']);
     config.appendRow(['QRPagoURL', '']);
-    config.appendRow(['QRPagoInfo', 'Yape / Plin al número del colegio']);
+    config.appendRow(['QRPagoInfo', 'Escanea para pagar']);
   }
 
   let funciones = ss.getSheetByName(SHEET_FUNCIONES);
@@ -182,7 +188,7 @@ function setupInicial() {
   let ventas = ss.getSheetByName(SHEET_VENTAS);
   if (!ventas) ventas = ss.insertSheet(SHEET_VENTAS);
   if (ventas.getLastRow() === 0) {
-    ventas.appendRow(['ID', 'FuncionID', 'Fecha', 'NombrePadre', 'Celular', 'Butacas', 'Cantidad', 'PrecioUnitario', 'Total', 'Estado', 'ComprobanteURL']);
+    ventas.appendRow(['ID', 'FuncionID', 'Fecha', 'NombrePadre', 'Celular', 'Butacas', 'Cantidad', 'PrecioUnitario', 'Total', 'Estado', 'ComprobanteURL', 'MetodoPago']);
   }
 
   SpreadsheetApp.flush();
@@ -267,7 +273,7 @@ function getDatosIniciales(funcionId) {
 // a enviar nada al servidor. No hace falta expirar reservas ni recuperarlas.
 // Usa LockService para evitar que dos padres compren la misma butaca a la vez.
 // "asientos" son códigos simples como "A1" (sin el prefijo de la función).
-function crearVenta(funcionId, nombrePadre, celular, asientos, imagenBase64, mimeType) {
+function crearVenta(funcionId, nombrePadre, celular, asientos, metodoPago, imagenBase64, mimeType) {
   nombrePadre = String(nombrePadre || '').trim();
   celular = String(celular || '').trim();
   if (!funcionId) throw new Error('Falta indicar la función (día).');
@@ -275,7 +281,8 @@ function crearVenta(funcionId, nombrePadre, celular, asientos, imagenBase64, mim
   if (!nombrePadre) throw new Error('Falta el nombre del padre/madre.');
   if (!/^[0-9+ ]{6,15}$/.test(celular)) throw new Error('Número de celular inválido.');
   if (!Array.isArray(asientos) || asientos.length === 0) throw new Error('Selecciona al menos una butaca.');
-  if (!imagenBase64) throw new Error('Falta el comprobante de pago.');
+  if (metodoPago !== METODO_PAGO.QR && metodoPago !== METODO_PAGO.EFECTIVO) throw new Error('Método de pago inválido.');
+  if (metodoPago === METODO_PAGO.QR && !imagenBase64) throw new Error('Falta el comprobante de pago.');
 
   const butacasIds = asientos.map(codigo => funcionId + '-' + codigo);
 
@@ -299,16 +306,19 @@ function crearVenta(funcionId, nombrePadre, celular, asientos, imagenBase64, mim
     const ventaId = Utilities.getUuid().split('-')[0].toUpperCase();
     const total = precio * asientos.length;
 
-    const folder = obtenerCarpetaComprobantes_();
-    const blob = Utilities.newBlob(Utilities.base64Decode(imagenBase64), mimeType, 'comprobante-' + ventaId);
-    const file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    const comprobanteUrl = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000';
+    let comprobanteUrl = '';
+    if (metodoPago === METODO_PAGO.QR) {
+      const folder = obtenerCarpetaComprobantes_();
+      const blob = Utilities.newBlob(Utilities.base64Decode(imagenBase64), mimeType, 'comprobante-' + ventaId);
+      const file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      comprobanteUrl = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1000';
+    }
 
     const ventasSheet = getSheet_(SHEET_VENTAS);
     ventasSheet.appendRow([
       ventaId, funcionId, new Date(), nombrePadre, celular,
-      asientos.join(', '), asientos.length, precio, total, ESTADO_VENTA.PENDIENTE, comprobanteUrl
+      asientos.join(', '), asientos.length, precio, total, ESTADO_VENTA.PENDIENTE, comprobanteUrl, metodoPago
     ]);
 
     for (const id of butacasIds) {
@@ -398,8 +408,28 @@ function cambiarEstadoVenta_(ventaId, nuevoEstadoVenta, nuevoEstadoButaca) {
   }
 }
 
-// Actualiza el QR de pago (imagen estática, ej. Yape/Plin). Solo admin. Se comparte entre todas las funciones.
+// Actualiza el QR de pago (imagen estática). Solo admin. Se comparte entre todas las funciones.
 // imagenBase64 viene sin el prefijo "data:image/...;base64,"
+// Renombra una función (ej. "Miércoles 3" -> "Sábado 10") desde el panel admin,
+// sin tener que editar la hoja Funciones a mano.
+function adminActualizarFuncion(password, funcionId, nombre) {
+  verificarAdmin_(password);
+  nombre = String(nombre || '').trim();
+  if (!funcionId) throw new Error('Falta indicar la función.');
+  if (!nombre) throw new Error('El nombre no puede estar vacío.');
+
+  const sheet = getSheet_(SHEET_FUNCIONES);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === funcionId) {
+      sheet.getRange(i + 1, 2).setValue(nombre);
+      funcionesCache_ = null;
+      return true;
+    }
+  }
+  throw new Error('Función no encontrada: ' + funcionId);
+}
+
 function adminActualizarQRPago(password, imagenBase64, mimeType, infoTexto) {
   verificarAdmin_(password);
   if (!imagenBase64) throw new Error('No se recibió ninguna imagen.');

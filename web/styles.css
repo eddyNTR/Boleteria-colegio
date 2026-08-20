@@ -96,13 +96,42 @@ main:has(#tab-admin.active) {
   margin-bottom: 6px;
 }
 
-.funcion-selector select {
-  width: 100%;
+.funcion-botones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.funcion-btn {
+  flex: 1 1 140px;
+  padding: 10px;
+  border: 2px solid var(--gris-borde);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: #fff;
+  color: var(--texto);
+  cursor: pointer;
+}
+
+.funcion-btn.active {
+  border-color: var(--azul);
+  background: var(--azul);
+  color: #fff;
+}
+
+.funcion-editar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.funcion-editar-input {
+  flex: 1;
   padding: 10px;
   border: 1px solid var(--gris-borde);
   border-radius: 8px;
-  font-size: 1rem;
-  background: #fff;
+  font-size: 0.95rem;
 }
 
 .seat-gap {
@@ -212,6 +241,26 @@ main:has(#tab-admin.active) {
   font-size: 1.05rem;
 }
 
+.metodo-pago {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.metodo-pago-opcion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--gris-borde);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.metodo-pago-opcion input { width: auto; margin: 0; }
+
 label {
   display: block;
   font-size: 0.85rem;
@@ -302,6 +351,25 @@ input[type="text"], input[type="tel"], input[type="password"], input[type="file"
   font-size: 0.95rem;
 }
 
+.ventas-funcion {
+  margin-bottom: 24px;
+}
+
+.ventas-funcion.oculto {
+  display: none;
+}
+
+.ventas-funcion h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.05rem;
+}
+
+.ventas-funcion-count {
+  font-weight: 400;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
 .tabla-wrap {
   overflow-x: auto;
   background: #fff;
@@ -348,6 +416,27 @@ th { background: #f1f5f9; }
 .modal[hidden] { display: none; }
 
 .tab-btn.oculto { display: none; }
+
+.admin-link {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-decoration: underline;
+  margin-left: auto;
+  align-self: center;
+  padding: 8px 4px;
+}
+
+.admin-sesion-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
 .modal-content {
   background: #fff;
   border-radius: var(--radio);

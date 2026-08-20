@@ -54,24 +54,26 @@ document.querySelectorAll('.subtab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('subtab-' + btn.dataset.subtab).classList.add('active');
     if (btn.dataset.subtab === 'ventas') cargarVentas();
+    if (btn.dataset.subtab === 'funciones') renderListaFunciones();
   });
 });
 
 // ---------- Selector de función (día) ----------
-document.getElementById('selectFuncion').addEventListener('change', (e) => {
-  seleccionadas.clear();
-  cargarMapa(e.target.value);
-});
-
+// Botones en vez de un desplegable, así ambas funciones quedan visibles a la vez.
 function poblarSelectorFunciones() {
-  const select = document.getElementById('selectFuncion');
-  select.innerHTML = '';
+  const cont = document.getElementById('funcionBotones');
+  cont.innerHTML = '';
   datosEvento.funciones.forEach(f => {
-    const opt = document.createElement('option');
-    opt.value = f.id;
-    opt.textContent = f.nombre;
-    if (f.id === datosEvento.funcionActual) opt.selected = true;
-    select.appendChild(opt);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'funcion-btn' + (f.id === datosEvento.funcionActual ? ' active' : '');
+    btn.textContent = f.nombre;
+    btn.addEventListener('click', () => {
+      if (f.id === funcionActual) return;
+      seleccionadas.clear();
+      cargarMapa(f.id);
+    });
+    cont.appendChild(btn);
   });
 }
 
@@ -191,6 +193,16 @@ function actualizarQrPagoEnFormulario() {
 
 document.getElementById('btnRefrescar').addEventListener('click', () => cargarMapa(funcionActual));
 
+// ---------- Método de pago (QR vs. efectivo) ----------
+document.querySelectorAll('input[name="metodoPago"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    const esQr = document.querySelector('input[name="metodoPago"]:checked').value === 'qr';
+    document.getElementById('bloqueQrPago').hidden = !esQr;
+    document.getElementById('bloqueEfectivo').hidden = esQr;
+    document.getElementById('inputComprobante').required = esQr;
+  });
+});
+
 // ---------- Formulario de compra ----------
 // Todo se envía junto (asientos + datos + comprobante) en un solo paso: la butaca
 // recién se bloquea cuando la venta ya está completa con el comprobante adjunto.
@@ -207,9 +219,10 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
 
   const nombrePadre = document.getElementById('nombrePadre').value.trim();
   const celularPadre = document.getElementById('celularPadre').value.trim();
+  const metodoPago = document.querySelector('input[name="metodoPago"]:checked').value;
   const inputComprobante = document.getElementById('inputComprobante');
 
-  if (!inputComprobante.files || inputComprobante.files.length === 0) {
+  if (metodoPago === 'qr' && (!inputComprobante.files || inputComprobante.files.length === 0)) {
     mostrarMsg(msg, 'Adjunta la imagen del comprobante de pago.', 'error');
     return;
   }
@@ -219,16 +232,22 @@ document.getElementById('formCompra').addEventListener('submit', async (e) => {
   boton.textContent = 'Procesando…';
 
   try {
-    const file = inputComprobante.files[0];
-    const base64 = await archivoABase64(file);
+    let imagenBase64 = null;
+    let mimeType = null;
+    if (metodoPago === 'qr') {
+      const file = inputComprobante.files[0];
+      imagenBase64 = await archivoABase64(file);
+      mimeType = file.type;
+    }
 
     const venta = await llamarApi('crearVenta', {
       funcionId: funcionActual,
       nombrePadre,
       celular: celularPadre,
       asientos: Array.from(seleccionadas),
-      imagenBase64: base64,
-      mimeType: file.type
+      metodoPago,
+      imagenBase64,
+      mimeType
     });
 
     mostrarResultadoCompra(venta);
@@ -264,18 +283,50 @@ async function mostrarResultadoCompra(venta) {
 }
 
 // ---------- Admin: login ----------
+const SS_ADMIN_PASSWORD = 'boleteria_admin_password';
+
+async function entrarComoAdmin(clave, msgEl) {
+  await llamarApi('adminLogin', { password: clave });
+  adminPassword = clave;
+  sessionStorage.setItem(SS_ADMIN_PASSWORD, clave);
+  document.getElementById('loginAdmin').hidden = true;
+  document.getElementById('panelAdmin').hidden = false;
+  await cargarVentas();
+  await cargarQRActual();
+}
+
 document.getElementById('btnLoginAdmin').addEventListener('click', async () => {
   const clave = document.getElementById('claveAdmin').value;
   const msg = document.getElementById('msgLoginAdmin');
   try {
-    await llamarApi('adminLogin', { password: clave });
-    adminPassword = clave;
-    document.getElementById('loginAdmin').hidden = true;
-    document.getElementById('panelAdmin').hidden = false;
-    await cargarVentas();
-    await cargarQRActual();
+    await entrarComoAdmin(clave, msg);
   } catch (err) {
     mostrarMsg(msg, err.message, 'error');
+  }
+});
+
+document.getElementById('btnCerrarSesionAdmin').addEventListener('click', () => {
+  sessionStorage.removeItem(SS_ADMIN_PASSWORD);
+  adminPassword = null;
+  document.getElementById('claveAdmin').value = '';
+  document.getElementById('panelAdmin').hidden = true;
+  document.getElementById('loginAdmin').hidden = false;
+});
+
+// Botón "Acceso administrador" visible desde la página principal: revela la pestaña
+// y, si hay una sesión guardada (sessionStorage, dura hasta cerrar la pestaña), entra directo.
+document.getElementById('btnAccesoAdmin').addEventListener('click', async () => {
+  const btnAdmin = document.getElementById('btnTabAdmin');
+  btnAdmin.classList.remove('oculto');
+  btnAdmin.click();
+
+  const claveGuardada = sessionStorage.getItem(SS_ADMIN_PASSWORD);
+  if (claveGuardada) {
+    try {
+      await entrarComoAdmin(claveGuardada, document.getElementById('msgLoginAdmin'));
+    } catch (err) {
+      sessionStorage.removeItem(SS_ADMIN_PASSWORD);
+    }
   }
 });
 
@@ -310,43 +361,92 @@ async function cargarVentas() {
   }
 }
 
+// Una pestaña por función (Miércoles / Jueves): cada una redirige a su propia
+// tabla, en vez de mostrarlas todas apiladas una debajo de la otra.
+let funcionVentasActiva = null;
+
 function renderTablaVentas(ventas) {
-  const tbody = document.querySelector('#tablaVentas tbody');
-  tbody.innerHTML = '';
-  ventas.forEach(v => {
-    const tr = document.createElement('tr');
-    const fecha = new Date(v.Fecha);
-    tr.innerHTML = `
-      <td>${v.ID}</td>
-      <td>${v.FuncionNombre}</td>
-      <td>${isNaN(fecha) ? v.Fecha : fecha.toLocaleString()}</td>
-      <td>${v.NombrePadre}</td>
-      <td>${v.Celular}</td>
-      <td>${v.Butacas}</td>
-      <td>Bs ${v.Total}</td>
-      <td>${v.ComprobanteURL ? `<a href="${v.ComprobanteURL}" target="_blank" rel="noopener">Ver</a>` : '—'}</td>
-      <td><span class="estado-pill ${v.Estado}">${v.Estado}</span></td>
-      <td></td>
-    `;
-    const tdAcciones = tr.querySelector('td:last-child');
-    if (v.Estado === 'pendiente') {
-      const btnOk = document.createElement('button');
-      btnOk.textContent = 'Confirmar';
-      btnOk.className = 'accion-btn confirmar';
-      btnOk.addEventListener('click', () => accionVenta(v.ID, 'adminConfirmarVenta'));
-      const btnNo = document.createElement('button');
-      btnNo.textContent = 'Cancelar';
-      btnNo.className = 'accion-btn cancelar';
-      btnNo.addEventListener('click', () => accionVenta(v.ID, 'adminCancelarVenta'));
-      tdAcciones.append(btnOk, btnNo);
-    }
-    tbody.appendChild(tr);
-  });
-  if (ventas.length === 0) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="10" style="text-align:center;color:#64748b;">Sin resultados</td>`;
-    tbody.appendChild(tr);
+  const tabsCont = document.getElementById('funcionVentasTabs');
+  const cont = document.getElementById('ventasPorFuncion');
+  tabsCont.innerHTML = '';
+  cont.innerHTML = '';
+
+  const funciones = (datosEvento && datosEvento.funciones) || [];
+  const grupos = funciones.length
+    ? funciones.map(f => ({ id: f.id, nombre: f.nombre }))
+    : Array.from(new Map(ventas.map(v => [v.FuncionID, v.FuncionNombre])))
+        .map(([id, nombre]) => ({ id, nombre }));
+
+  if (!grupos.some(g => g.id === funcionVentasActiva)) {
+    funcionVentasActiva = grupos.length ? grupos[0].id : null;
   }
+
+  grupos.forEach(grupo => {
+    const ventasGrupo = ventas.filter(v => v.FuncionID === grupo.id);
+
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'subtab-btn' + (grupo.id === funcionVentasActiva ? ' active' : '');
+    tab.textContent = `${grupo.nombre} (${ventasGrupo.length})`;
+    tab.addEventListener('click', () => {
+      funcionVentasActiva = grupo.id;
+      renderTablaVentas(ventas);
+    });
+    tabsCont.appendChild(tab);
+
+    const seccion = document.createElement('div');
+    seccion.className = 'ventas-funcion' + (grupo.id === funcionVentasActiva ? '' : ' oculto');
+    seccion.innerHTML = `
+      <div class="tabla-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Fecha</th><th>Padre/Madre</th><th>Celular</th>
+              <th>Butacas</th><th>Total</th><th>Método</th><th>Comprobante</th><th>Estado</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    `;
+    cont.appendChild(seccion);
+
+    const tbody = seccion.querySelector('tbody');
+    ventasGrupo.forEach(v => {
+      const tr = document.createElement('tr');
+      const fecha = new Date(v.Fecha);
+      tr.innerHTML = `
+        <td>${v.ID}</td>
+        <td>${isNaN(fecha) ? v.Fecha : fecha.toLocaleString()}</td>
+        <td>${v.NombrePadre}</td>
+        <td>${v.Celular}</td>
+        <td>${v.Butacas}</td>
+        <td>Bs ${v.Total}</td>
+        <td>${v.MetodoPago === 'efectivo' ? 'Efectivo' : 'QR'}</td>
+        <td>${v.ComprobanteURL ? `<a href="${v.ComprobanteURL}" target="_blank" rel="noopener">Ver</a>` : '—'}</td>
+        <td><span class="estado-pill ${v.Estado}">${v.Estado}</span></td>
+        <td></td>
+      `;
+      const tdAcciones = tr.querySelector('td:last-child');
+      if (v.Estado === 'pendiente') {
+        const btnOk = document.createElement('button');
+        btnOk.textContent = 'Confirmar';
+        btnOk.className = 'accion-btn confirmar';
+        btnOk.addEventListener('click', () => accionVenta(v.ID, 'adminConfirmarVenta'));
+        const btnNo = document.createElement('button');
+        btnNo.textContent = 'Cancelar';
+        btnNo.className = 'accion-btn cancelar';
+        btnNo.addEventListener('click', () => accionVenta(v.ID, 'adminCancelarVenta'));
+        tdAcciones.append(btnOk, btnNo);
+      }
+      tbody.appendChild(tr);
+    });
+    if (ventasGrupo.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="10" style="text-align:center;color:#64748b;">Sin resultados</td>`;
+      tbody.appendChild(tr);
+    }
+  });
 }
 
 async function accionVenta(ventaId, accion) {
@@ -391,6 +491,36 @@ document.getElementById('btnGuardarQR').addEventListener('click', async () => {
   }
 });
 
+// ---------- Admin: nombres de funciones ----------
+function renderListaFunciones() {
+  const cont = document.getElementById('listaFunciones');
+  cont.innerHTML = '';
+  if (!datosEvento) return;
+
+  datosEvento.funciones.forEach(f => {
+    const fila = document.createElement('div');
+    fila.className = 'funcion-editar';
+    fila.innerHTML = `
+      <input type="text" value="${f.nombre.replace(/"/g, '&quot;')}" class="funcion-editar-input">
+      <button type="button" class="btn-secundario funcion-editar-btn">Guardar</button>
+    `;
+    const input = fila.querySelector('input');
+    fila.querySelector('button').addEventListener('click', async () => {
+      const msg = document.getElementById('msgFunciones');
+      try {
+        await llamarApi('adminActualizarFuncion', { password: adminPassword, funcionId: f.id, nombre: input.value.trim() });
+        f.nombre = input.value.trim();
+        mostrarMsg(msg, 'Nombre actualizado.', 'ok');
+        poblarSelectorFunciones();
+        renderTablaVentas(ventasCache);
+      } catch (err) {
+        mostrarMsg(msg, err.message, 'error');
+      }
+    });
+    cont.appendChild(fila);
+  });
+}
+
 function archivoABase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -408,12 +538,10 @@ document.getElementById('cerrarModal').addEventListener('click', () => {
 // ---------- Acceso al panel admin (oculto para padres) ----------
 // La pestaña "Panel Admin" solo aparece si se entra con ?admin=1 en la URL.
 // El acceso real sigue protegido por la clave de administrador (verificada en el servidor).
-function revisarAccesoAdmin() {
+async function revisarAccesoAdmin() {
   const params = new URLSearchParams(location.search);
   if (params.get('admin') === '1') {
-    const btnAdmin = document.getElementById('btnTabAdmin');
-    btnAdmin.classList.remove('oculto');
-    btnAdmin.click();
+    document.getElementById('btnAccesoAdmin').click();
   }
 }
 

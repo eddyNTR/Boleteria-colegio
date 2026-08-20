@@ -13,6 +13,7 @@
   <nav class="tabs">
     <button class="tab-btn active" data-tab="comprar">Comprar</button>
     <button class="tab-btn oculto" data-tab="admin" id="btnTabAdmin">Panel Admin</button>
+    <button id="btnAccesoAdmin" class="admin-link" type="button">Acceso administrador</button>
   </nav>
 </header>
 
@@ -24,8 +25,8 @@
     <div id="msgComprar" class="msg" hidden></div>
 
     <div class="funcion-selector">
-      <label for="selectFuncion">Función (día)</label>
-      <select id="selectFuncion"></select>
+      <label>Función (día)</label>
+      <div id="funcionBotones" class="funcion-botones"></div>
     </div>
 
     <div class="legend">
@@ -60,16 +61,32 @@
         <input type="tel" id="celularPadre" required placeholder="Ej. 987654321">
       </label>
 
-      <h2>2. Paga escaneando este QR</h2>
-      <p id="qrPagoInfoTexto"><small>Selecciona butacas arriba para ver el monto exacto.</small></p>
-      <img id="qrPagoImg" class="qr-img" alt="QR de pago" hidden>
+      <h2>2. Método de pago</h2>
+      <div class="metodo-pago">
+        <label class="metodo-pago-opcion">
+          <input type="radio" name="metodoPago" value="qr" checked>
+          QR de pago
+        </label>
+        <label class="metodo-pago-opcion">
+          <input type="radio" name="metodoPago" value="efectivo">
+          Efectivo (pago físico en el colegio)
+        </label>
+      </div>
 
-      <h2>3. Adjunta tu comprobante de pago</h2>
-      <p><small>Foto o captura de pantalla del Yape/Plin/transferencia. Sin esto no se puede completar la reserva.</small></p>
-      <label>
-        Imagen del comprobante
-        <input type="file" id="inputComprobante" accept="image/*" required>
-      </label>
+      <div id="bloqueQrPago">
+        <p id="qrPagoInfoTexto"><small>Selecciona butacas arriba para ver el monto exacto.</small></p>
+        <img id="qrPagoImg" class="qr-img" alt="QR de pago" hidden>
+
+        <p><small>Foto o captura de pantalla del pago. Sin esto no se puede completar la reserva.</small></p>
+        <label>
+          Imagen del comprobante
+          <input type="file" id="inputComprobante" accept="image/*" required>
+        </label>
+      </div>
+
+      <div id="bloqueEfectivo" hidden>
+        <p><small>Tu butaca queda <strong>reservada</strong> y debes pasar a pagar en efectivo por la secretaría del colegio antes de la función. Si no se confirma el pago, la reserva puede cancelarse.</small></p>
+      </div>
 
       <button type="submit" class="btn-primario">Confirmar compra</button>
     </form>
@@ -92,10 +109,14 @@
 
     <div id="panelAdmin" class="panel-admin" hidden>
 
-      <nav class="subtabs">
-        <button class="subtab-btn active" data-subtab="ventas">Ventas</button>
-        <button class="subtab-btn" data-subtab="qr">QR de pago</button>
-      </nav>
+      <div class="admin-sesion-bar">
+        <nav class="subtabs">
+          <button class="subtab-btn active" data-subtab="ventas">Ventas</button>
+          <button class="subtab-btn" data-subtab="qr">QR de pago</button>
+          <button class="subtab-btn" data-subtab="funciones">Funciones</button>
+        </nav>
+        <button id="btnCerrarSesionAdmin" class="btn-secundario" type="button">Cerrar sesión</button>
+      </div>
 
       <div id="subtab-ventas" class="subtab-panel active">
         <div class="admin-toolbar">
@@ -104,21 +125,12 @@
           <button id="btnExportarSheet" class="btn-secundario" type="button">Abrir Google Sheet</button>
         </div>
         <div id="msgVentas" class="msg" hidden></div>
-        <div class="tabla-wrap">
-          <table id="tablaVentas">
-            <thead>
-              <tr>
-                <th>ID</th><th>Función</th><th>Fecha</th><th>Padre/Madre</th><th>Celular</th>
-                <th>Butacas</th><th>Total</th><th>Comprobante</th><th>Estado</th><th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <nav id="funcionVentasTabs" class="subtabs"></nav>
+        <div id="ventasPorFuncion"></div>
       </div>
 
       <div id="subtab-qr" class="subtab-panel">
-        <h2>QR de pago (Yape / Plin / transferencia)</h2>
+        <h2>QR de pago</h2>
         <p>Esta imagen es la que verán los padres para pagar. Solo el administrador puede cambiarla.</p>
         <div class="qr-actual">
           <p>QR actual:</p>
@@ -129,11 +141,18 @@
           <input type="file" id="inputQR" accept="image/*">
         </label>
         <label>
-          Texto informativo (ej. "Yape al 987654321 - Colegio XYZ")
+          Texto informativo (ej. "Escanea para pagar - Colegio XYZ")
           <input type="text" id="infoQR" placeholder="Información de pago">
         </label>
         <button id="btnGuardarQR" class="btn-primario" type="button">Guardar nuevo QR</button>
         <div id="msgQR" class="msg" hidden></div>
+      </div>
+
+      <div id="subtab-funciones" class="subtab-panel">
+        <h2>Nombres de las funciones (días)</h2>
+        <p>Así se cambia el texto que ven los padres (ej. "Miércoles 3") sin tener que editar el Google Sheet a mano.</p>
+        <div id="listaFunciones"></div>
+        <div id="msgFunciones" class="msg" hidden></div>
       </div>
 
     </div>
