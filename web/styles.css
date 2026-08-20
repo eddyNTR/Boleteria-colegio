@@ -271,9 +271,10 @@ input[type="text"], input[type="tel"], input[type="password"], input[type="file"
   background: #fff;
   padding: 8px;
 }
+.qr-img[hidden] { display: none; }
 
 #qrPagoImg {
-  max-width: 380px;
+  max-width: 440px;
 }
 
 .qr-actual { margin-bottom: 16px; }
