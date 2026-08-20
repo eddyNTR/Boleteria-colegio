@@ -258,14 +258,22 @@ input[type="text"], input[type="tel"], input[type="password"], input[type="file"
   text-align: center;
 }
 
-.resultado-compra img.qr-img { max-width: 220px; margin: 10px auto; display: block; }
+.resultado-compra img.qr-img { max-width: 260px; margin: 10px auto; display: block; }
 
 .qr-img {
-  max-width: 200px;
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  margin: 10px auto;
   border: 1px solid var(--gris-borde);
   border-radius: 8px;
   background: #fff;
-  padding: 6px;
+  padding: 8px;
+}
+
+#qrPagoImg {
+  max-width: 380px;
 }
 
 .qr-actual { margin-bottom: 16px; }
