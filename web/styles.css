@@ -66,7 +66,8 @@ main {
 /* La pestaña Admin tiene una tabla ancha (Ventas), así que le damos más espacio
    que a la vista de compra (que se mantiene angosta para que se vea bien en celular). */
 main:has(#tab-admin.active) {
-  max-width: 1200px;
+  max-width: 96vw;
+  width: 1500px;
 }
 
 .tab-panel, .subtab-panel { display: none; }
