@@ -49,7 +49,8 @@ const ACTIONS = {
   adminConfirmarVenta: params => adminConfirmarVenta(params.password, params.ventaId),
   adminCancelarVenta: params => adminCancelarVenta(params.password, params.ventaId),
   adminActualizarQRPago: params => adminActualizarQRPago(params.password, params.imagenBase64, params.mimeType, params.infoTexto),
-  adminActualizarFuncion: params => adminActualizarFuncion(params.password, params.funcionId, params.nombre)
+  adminActualizarFuncion: params => adminActualizarFuncion(params.password, params.funcionId, params.nombre),
+  adminObtenerSheetUrl: params => adminObtenerSheetUrl(params.password)
 };
 
 function doGet(e) {
@@ -357,6 +358,11 @@ function verificarAdmin_(password) {
 function adminLogin(password) {
   verificarAdmin_(password);
   return true;
+}
+
+function adminObtenerSheetUrl(password) {
+  verificarAdmin_(password);
+  return SpreadsheetApp.getActiveSpreadsheet().getUrl();
 }
 
 function adminGetVentas(password) {

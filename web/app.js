@@ -285,6 +285,8 @@ async function mostrarResultadoCompra(venta) {
 // ---------- Admin: login ----------
 const SS_ADMIN_PASSWORD = 'boleteria_admin_password';
 
+let sheetUrl = null;
+
 async function entrarComoAdmin(clave, msgEl) {
   await llamarApi('adminLogin', { password: clave });
   adminPassword = clave;
@@ -293,6 +295,9 @@ async function entrarComoAdmin(clave, msgEl) {
   document.getElementById('panelAdmin').hidden = false;
   await cargarVentas();
   await cargarQRActual();
+  try {
+    sheetUrl = await llamarApi('adminObtenerSheetUrl', { password: adminPassword });
+  } catch (err) { /* no crítico si falla */ }
 }
 
 document.getElementById('btnLoginAdmin').addEventListener('click', async () => {
@@ -334,8 +339,15 @@ document.getElementById('btnAccesoAdmin').addEventListener('click', async () => 
 let ventasCache = [];
 
 document.getElementById('btnRefrescarVentas').addEventListener('click', cargarVentas);
-document.getElementById('btnExportarSheet').addEventListener('click', () => {
-  alert('Abre directamente el Google Sheet vinculado al proyecto de Apps Script (hoja "Ventas") para ver el historial completo.');
+document.getElementById('btnExportarSheet').addEventListener('click', async () => {
+  if (!sheetUrl) {
+    try { sheetUrl = await llamarApi('adminObtenerSheetUrl', { password: adminPassword }); } catch (err) { /* ignorar */ }
+  }
+  if (sheetUrl) {
+    window.open(sheetUrl, '_blank', 'noopener');
+  } else {
+    alert('No se pudo obtener el enlace al Google Sheet. Ábrelo directamente desde tu Google Drive.');
+  }
 });
 
 document.getElementById('buscarVentas').addEventListener('input', (e) => {
