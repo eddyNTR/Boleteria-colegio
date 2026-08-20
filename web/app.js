@@ -81,6 +81,7 @@ function poblarSelectorFunciones() {
 async function cargarMapa(funcionId) {
   const seatMap = document.getElementById('seatMap');
   const msg = document.getElementById('msgComprar');
+  mostrarMsg(msg, 'Cargando butacas…', 'info');
   try {
     datosEvento = await llamarApi('getDatosIniciales', funcionId ? { funcionId } : undefined);
     funcionActual = datosEvento.funcionActual;
@@ -340,12 +341,19 @@ let ventasCache = [];
 
 document.getElementById('btnRefrescarVentas').addEventListener('click', cargarVentas);
 document.getElementById('btnExportarSheet').addEventListener('click', async () => {
+  // Abrimos la pestaña vacía YA, en el mismo instante del clic (sin await antes),
+  // porque si esperamos a la respuesta del servidor primero, el navegador ya no lo
+  // reconoce como una acción directa del usuario y bloquea el popup.
+  const nuevaVentana = window.open('about:blank', '_blank');
+
   if (!sheetUrl) {
     try { sheetUrl = await llamarApi('adminObtenerSheetUrl', { password: adminPassword }); } catch (err) { /* ignorar */ }
   }
-  if (sheetUrl) {
-    window.open(sheetUrl, '_blank', 'noopener');
+
+  if (sheetUrl && nuevaVentana) {
+    nuevaVentana.location.href = sheetUrl;
   } else {
+    if (nuevaVentana) nuevaVentana.close();
     alert('No se pudo obtener el enlace al Google Sheet. Ábrelo directamente desde tu Google Drive.');
   }
 });
@@ -363,6 +371,7 @@ function filtrarVentas(ventas, termino) {
 
 async function cargarVentas() {
   const msg = document.getElementById('msgVentas');
+  mostrarMsg(msg, 'Cargando ventas…', 'info');
   try {
     ventasCache = await llamarApi('adminGetVentas', { password: adminPassword });
     const termino = document.getElementById('buscarVentas').value;
@@ -489,6 +498,7 @@ document.getElementById('btnGuardarQR').addEventListener('click', async () => {
   }
   const file = input.files[0];
   const base64 = await archivoABase64(file);
+  mostrarMsg(msg, 'Subiendo QR…', 'info');
 
   try {
     const url = await llamarApi('adminActualizarQRPago', {
