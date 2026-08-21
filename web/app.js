@@ -298,6 +298,8 @@ async function mostrarResultadoCompra(venta) {
     <h2>¡Compra registrada!</h2>
     <p>Función: <strong>${venta.funcionNombre}</strong></p>
     <p>Código de venta: <strong>${venta.ventaId}</strong></p>
+    <p>Nombre: <strong>${venta.nombrePadre}</strong></p>
+    <p>Celular: <strong>${venta.celular}</strong></p>
     <p>Butacas: <strong>${venta.asientos.join(', ')}</strong></p>
     <p>Total pagado: <strong>Bs ${venta.total}</strong></p>
     <p>Guarda este comprobante:</p>
@@ -308,27 +310,37 @@ async function mostrarResultadoCompra(venta) {
   cont.scrollIntoView({ behavior: 'smooth' });
 
   const canvas = document.getElementById('canvasComprobante');
-  await dibujarComprobante(canvas, venta);
 
+  // El botón se conecta ANTES de dibujar el canvas: si generar el QR falla por
+  // cualquier motivo, igual queremos que el botón reaccione (mostrando el error)
+  // en vez de quedar sin ningún listener conectado, lo que hacía que pareciera
+  // que "no hacía nada" al presionarlo.
   document.getElementById('btnDescargarComprobante').addEventListener('click', () => {
-    canvas.toBlob(blob => {
-      const url = URL.createObjectURL(blob);
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
       const a = document.createElement('a');
-      a.href = url;
+      a.href = dataUrl;
       a.download = `comprobante-${venta.ventaId}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    }, 'image/png');
+    } catch (err) {
+      alert('No se pudo descargar la imagen: ' + err.message);
+    }
   });
+
+  try {
+    await dibujarComprobante(canvas, venta);
+  } catch (err) {
+    mostrarMsg(document.getElementById('msgComprar'), 'No se pudo generar el comprobante: ' + err.message, 'error');
+  }
 }
 
 // Dibuja el comprobante completo (datos + QR) en un canvas propio, en vez de solo
 // el QR, para poder ofrecer la descarga como una única imagen.
 async function dibujarComprobante(canvas, venta) {
   const ancho = 360;
-  const alto = 480;
+  const alto = 540;
   canvas.width = ancho;
   canvas.height = alto;
   const ctx = canvas.getContext('2d');
@@ -347,6 +359,8 @@ async function dibujarComprobante(canvas, venta) {
   ctx.fillStyle = '#1f2937';
   ctx.font = '14px sans-serif';
   const lineas = [
+    `Nombre: ${venta.nombrePadre}`,
+    `Celular: ${venta.celular}`,
     `Función: ${venta.funcionNombre}`,
     `Código: ${venta.ventaId}`,
     `Butacas: ${venta.asientos.join(', ')}`,
@@ -358,7 +372,7 @@ async function dibujarComprobante(canvas, venta) {
   const qrDataUrl = await QRCode.toDataURL(textoQr, { width: 220, margin: 1 });
   const img = await cargarImagen(qrDataUrl);
   const qrX = (ancho - 220) / 2;
-  const qrY = 165;
+  const qrY = 68 + lineas.length * 22 + 20;
   ctx.drawImage(img, qrX, qrY, 220, 220);
 
   ctx.fillStyle = '#64748b';

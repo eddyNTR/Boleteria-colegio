@@ -334,7 +334,9 @@ function crearVenta(funcionId, nombrePadre, celular, asientos, metodoPago, image
       total: total,
       nombreEvento: getConfigValue_('NombreEvento'),
       funcionNombre: funcion ? funcion.nombre : funcionId,
-      asientos: asientos
+      asientos: asientos,
+      nombrePadre: nombrePadre,
+      celular: celular
     };
   } finally {
     lock.releaseLock();
