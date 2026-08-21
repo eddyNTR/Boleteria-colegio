@@ -110,17 +110,39 @@ function renderMapa() {
   const butacasPorFila = datosEvento.butacasPorFila || 0;
   const pasilloTrasNumero = datosEvento.pasilloTrasNumero || 0;
 
-  // Columnas: etiqueta de fila + una columna por asiento + una columna angosta
-  // para el pasillo (si corresponde) — todas reparten el ancho disponible (1fr),
-  // así el mapa entra completo sin necesitar scroll horizontal.
-  const columnas = ['minmax(16px, 22px)'];
+  // Calculamos un tamaño de celda FIJO en píxeles (igual para ancho y alto) según
+  // el espacio disponible, en vez de dejar que el grid decida solo. Con columnas
+  // flexibles (1fr) más "align-items: stretch", el alto de cada butaca terminaba
+  // definido por el contenido de la fila y no por su propio ancho, deformando el
+  // cuadrado. Fijando ambas medidas iguales garantizamos butacas cuadradas.
+  const anchoDisponible = seatMap.parentElement.clientWidth || 320;
+  const anchoLabel = 20;
+  const gapPx = 3;
+  const totalGaps = butacasPorFila + (pasilloTrasNumero ? 1 : 0);
+
+  // El pasillo se calcula en dos pasadas: una estimación de la butaca primero
+  // (con un pasillo provisorio), y con eso un pasillo proporcional al tamaño real
+  // de la butaca — así en pantallas grandes (butacas más grandes) el pasillo
+  // también se ve más ancho, en vez de quedar angosto y pegado a los asientos.
+  const anchoParaAsientosProv = anchoDisponible - anchoLabel - (gapPx * (totalGaps + 1)) - 16;
+  const celdaProv = Math.max(14, Math.min(30, Math.floor(anchoParaAsientosProv / butacasPorFila)));
+  const anchoPasillo = pasilloTrasNumero ? Math.max(12, Math.min(24, Math.round(celdaProv * 0.6))) : 0;
+
+  const anchoParaAsientos = anchoDisponible - anchoLabel - anchoPasillo - (gapPx * (totalGaps + 1));
+  const celda = Math.max(14, Math.min(30, Math.floor(anchoParaAsientos / butacasPorFila)));
+
+  const columnas = [anchoLabel + 'px'];
   for (let n = 1; n <= butacasPorFila; n++) {
-    columnas.push('1fr');
-    if (pasilloTrasNumero && n === pasilloTrasNumero) columnas.push('minmax(6px, 12px)');
+    columnas.push(celda + 'px');
+    if (pasilloTrasNumero && n === pasilloTrasNumero) columnas.push(anchoPasillo + 'px');
   }
   seatMap.style.gridTemplateColumns = columnas.join(' ');
+  seatMap.style.gridAutoRows = celda + 'px';
 
-  Object.keys(porFila).sort().forEach(fila => {
+  const filasOrdenadas = Object.keys(porFila).sort();
+  const filaMedioIndex = Math.floor((filasOrdenadas.length - 1) / 2);
+
+  filasOrdenadas.forEach((fila, filaIndex) => {
     const label = document.createElement('div');
     label.className = 'seat-row-label';
     label.textContent = fila;
@@ -139,6 +161,12 @@ function renderMapa() {
       if (pasilloTrasNumero && Number(b.numero) === pasilloTrasNumero) {
         const gap = document.createElement('div');
         gap.className = 'seat-gap';
+        // El texto solo se pone en la fila del medio; al desbordar visualmente
+        // (overflow visible) se ve como una etiqueta continua sin romper el grid.
+        if (filaIndex === filaMedioIndex) {
+          gap.textContent = 'PASILLO';
+          gap.classList.add('seat-gap-texto');
+        }
         seatMap.appendChild(gap);
       }
     });
@@ -274,13 +302,77 @@ async function mostrarResultadoCompra(venta) {
     <p>Total pagado: <strong>Bs ${venta.total}</strong></p>
     <p>Guarda este comprobante:</p>
     <canvas id="canvasComprobante"></canvas>
+    <button id="btnDescargarComprobante" class="btn-secundario" type="button" style="margin-top:12px;width:100%;">Descargar comprobante (imagen)</button>
     <p><small>Tu butaca queda <strong>reservada</strong> hasta que el colegio confirme tu pago.</small></p>
   `;
   cont.scrollIntoView({ behavior: 'smooth' });
 
-  const texto = `VENTA:${venta.ventaId}|EVENTO:${venta.nombreEvento}|FUNCION:${venta.funcionNombre}|BUTACAS:${venta.asientos.join(',')}|TOTAL:${venta.total}`;
   const canvas = document.getElementById('canvasComprobante');
-  await QRCode.toCanvas(canvas, texto, { width: 200 });
+  await dibujarComprobante(canvas, venta);
+
+  document.getElementById('btnDescargarComprobante').addEventListener('click', () => {
+    canvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `comprobante-${venta.ventaId}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }, 'image/png');
+  });
+}
+
+// Dibuja el comprobante completo (datos + QR) en un canvas propio, en vez de solo
+// el QR, para poder ofrecer la descarga como una única imagen.
+async function dibujarComprobante(canvas, venta) {
+  const ancho = 360;
+  const alto = 480;
+  canvas.width = ancho;
+  canvas.height = alto;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, ancho, alto);
+  ctx.strokeStyle = '#d1d5db';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(4, 4, ancho - 8, alto - 8);
+
+  ctx.fillStyle = '#1e3a8a';
+  ctx.font = 'bold 19px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(venta.nombreEvento || 'Comprobante de compra', ancho / 2, 36);
+
+  ctx.fillStyle = '#1f2937';
+  ctx.font = '14px sans-serif';
+  const lineas = [
+    `Función: ${venta.funcionNombre}`,
+    `Código: ${venta.ventaId}`,
+    `Butacas: ${venta.asientos.join(', ')}`,
+    `Total: Bs ${venta.total}`
+  ];
+  lineas.forEach((linea, i) => ctx.fillText(linea, ancho / 2, 68 + i * 22));
+
+  const textoQr = `VENTA:${venta.ventaId}|EVENTO:${venta.nombreEvento}|FUNCION:${venta.funcionNombre}|BUTACAS:${venta.asientos.join(',')}|TOTAL:${venta.total}`;
+  const qrDataUrl = await QRCode.toDataURL(textoQr, { width: 220, margin: 1 });
+  const img = await cargarImagen(qrDataUrl);
+  const qrX = (ancho - 220) / 2;
+  const qrY = 165;
+  ctx.drawImage(img, qrX, qrY, 220, 220);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Butaca reservada hasta confirmar el pago.', ancho / 2, qrY + 220 + 24);
+}
+
+function cargarImagen(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 // ---------- Admin: login ----------
